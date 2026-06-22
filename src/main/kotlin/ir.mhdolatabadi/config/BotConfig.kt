@@ -27,7 +27,7 @@ object BotConfig {
             ?: throw IllegalStateException("BOT_TOKEN not found in environment or properties")
 
     val botUsername: String
-        get() = properties.getProperty("bot.username", "moseinbot")
+        get() = properties.getProperty("bot.username", "dailybot")
 
     val baseUrl: String
         get() = properties.getProperty("bot.base.url", "https://tapi.bale.ai/")
