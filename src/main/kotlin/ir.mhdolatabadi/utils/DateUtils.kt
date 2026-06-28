@@ -12,7 +12,7 @@ object DateUtils {
     fun toPersianDate(gregorian: LocalDate): PersianDate {
         val gregorianCalendar = java.util.GregorianCalendar.from(gregorian.atStartOfDay(tehranZone))
         val jalali = JalaliCalendar(gregorianCalendar)
-        return PersianDate(jalali.getYear(), jalali.getMonth(), jalali.getDay())
+        return PersianDate(jalali.year, jalali.month, jalali.day)
     }
 
     fun today(): LocalDate = LocalDate.now(tehranZone)

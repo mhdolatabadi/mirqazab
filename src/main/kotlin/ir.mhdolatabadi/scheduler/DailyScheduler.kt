@@ -47,9 +47,8 @@ class DailyScheduler(
                 val delay = Duration.between(now, nextRun).toMillis()
                 delay(delay)
 
-                // قبل از اجرای هر تسک، بررسی تعطیلات
                 if (isHoliday()) {
-                    continue // اگر تعطیل است، تسک را اجرا نکن و به چرخه بعدی برو
+                    continue
                 }
 
                 when (nextRun.hour) {
@@ -62,16 +61,12 @@ class DailyScheduler(
         }
     }
 
-    // ==================== بررسی تعطیلات (پنجشنبه و جمعه) ====================
     private fun isHoliday(): Boolean {
         val today = DateUtils.today()
-        // روز ۴ = پنجشنبه، روز ۵ = جمعه (در استاندارد ISO)
         return today.dayOfWeek.value == 4 || today.dayOfWeek.value == 5
     }
 
-    // ==================== ارسال سوال روزانه ====================
-    private suspend fun sendDailyQuestion() {
-        // در صورت تعطیل بودن، خروج (هرچند قبلاً بررسی شده، اما برای امنیت بیشتر)
+    private fun sendDailyQuestion() {
         if (isHoliday()) return
 
         val chatIds = memberService.getAllChatIds()
@@ -98,8 +93,7 @@ class DailyScheduler(
         }
     }
 
-    // ==================== ارسال فوری سوال روزانه (فقط با دستور، بدون بررسی تعطیلات) ====================
-    suspend fun sendDailyQuestionNow(chatId: String) {
+    fun sendDailyQuestionNow(chatId: String) {
         val (text, keyboard) = callbackQueryHandler.buildActivityMessage(chatId)
         val msg = SendMessage(chatId, text)
         msg.replyMarkup = keyboard
@@ -108,8 +102,7 @@ class DailyScheduler(
         println("✅ سوال فوری به $chatId ارسال شد.")
     }
 
-    // ==================== ارسال گزارش روزانه ====================
-    private suspend fun sendDailyReport() {
+    private fun sendDailyReport() {
         if (isHoliday()) return
 
         val chatIds = memberService.getAllChatIds()
@@ -125,18 +118,16 @@ class DailyScheduler(
         }
     }
 
-    // ==================== ارسال فوری گزارش روزانه (فقط با دستور) ====================
-    suspend fun sendDailyReportNow(chatId: String) {
+    fun sendDailyReportNow(chatId: String) {
         val report = reportService.generateDailyReport(chatId)
-        val fullMessage = "📊 **گزارش روزانه (ارسال فوری)**\n\n$report"
+        val fullMessage = "📊 *گزارش روزانه (ارسال فوری)*\n\n$report"
         val msg = SendMessage(chatId, fullMessage)
         msg.parseMode = "Markdown"
         bot.execute(msg)
         println("✅ گزارش فوری به $chatId ارسال شد.")
     }
 
-    // ==================== یادآوری جلسه روزانه ====================
-    private suspend fun sendDailyReminder() {
+    private fun sendDailyReminder() {
         if (isHoliday()) return
 
         val chatIds = memberService.getAllChatIds()
@@ -144,7 +135,7 @@ class DailyScheduler(
 
         for (chatId in chatIds) {
             if (!attendanceService.hasAttendanceToday(chatId.toString(), today)) {
-                val message = "🔔 **یادآوری روزانه**\n\nگزارش جلسه امروز هنوز ثبت نشده است.\nلطفاً با ارسال كلمه «میرغضب» گزارش را ثبت کنید."
+                val message = "🔔 *یادآوری روزانه*\n\nگزارش جلسه امروز هنوز ثبت نشده است.\nلطفاً با ارسال كلمه «میرغضب» گزارش را ثبت کنید."
                 val msg = SendMessage(chatId.toString(), message)
                 msg.parseMode = "Markdown"
                 try {
@@ -156,14 +147,13 @@ class DailyScheduler(
         }
     }
 
-    // ==================== گزارش‌های هفتگی و ماهانه ====================
-    private suspend fun checkAndSendReports() {
+    private fun checkAndSendReports() {
         if (isHoliday()) return
 
         val today = DateUtils.today()
         val persianDate = DateUtils.toPersianDate(today)
 
-        if (today.dayOfWeek.value == 5) { // جمعه
+        if (today.dayOfWeek.value == 5) {
             sendWeeklyReportToAllGroups()
         }
 
@@ -172,7 +162,7 @@ class DailyScheduler(
         }
     }
 
-    private suspend fun sendWeeklyReportToAllGroups() {
+    private fun sendWeeklyReportToAllGroups() {
         val chatIds = attendanceService.getDistinctChatIds()
         val endDate = DateUtils.today()
         val startDate = endDate.minusWeeks(1)
@@ -199,7 +189,7 @@ class DailyScheduler(
         }
     }
 
-    private suspend fun sendMonthlyReportToAllGroups() {
+    private fun sendMonthlyReportToAllGroups() {
         val chatIds = attendanceService.getDistinctChatIds()
         val endDate = DateUtils.today()
         val startDate = endDate.minusMonths(1)

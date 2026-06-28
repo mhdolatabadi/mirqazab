@@ -15,20 +15,18 @@ import jakarta.persistence.EntityManagerFactory
 import kotlinx.coroutines.runBlocking
 
 class DailyBot(
-    private val botToken: String,
+    botToken: String,
     private val botUsername: String,
     options: DefaultBotOptions = DefaultBotOptions(),
-    private val entityManagerFactory: EntityManagerFactory
+    entityManagerFactory: EntityManagerFactory
 ) : TelegramLongPollingBot(options, botToken) {
 
-    // ==================== سرویس‌ها ====================
     private val memberService = MemberService(entityManagerFactory)
     private val attendanceService = AttendanceService(entityManagerFactory)
     private val activityService = ActivityService(entityManagerFactory)
     private val settingService = SettingService(entityManagerFactory)
 
     private val reportService = ReportService(
-        entityManagerFactory,
         attendanceService,
         activityService,
         memberService
@@ -84,12 +82,11 @@ class DailyBot(
         }
         if (user.isBot) return
         val chatId = message.chatId.toLong()
-        val fullName = "${user.firstName ?: ""} ${user.lastName ?: ""}".trim()
-        val displayName = if (fullName.isNotEmpty()) fullName else user.userName ?: "کاربر ${user.id}"
+        val fullName = "${user.firstName} ${user.lastName ?: ""}".trim()
+        val displayName = fullName.ifEmpty { user.userName ?: "کاربر ${user.id}" }
         memberService.recordUserActivity(chatId, user.id, displayName)
     }
 
-    // ==================== مدیریت پیام‌های متنی ====================
     private fun handleTextMessage(update: Update) {
         val chatId = update.message.chatId.toString()
         val text = update.message.text
@@ -137,13 +134,12 @@ class DailyBot(
         }
     }
 
-    // ==================== فعال/غیرفعال کردن سوال روزانه ====================
     private fun toggleDailyQuestion(chatId: String) {
         val currentStatus = settingService.isDailyQuestionEnabled(chatId)
         val newStatus = !currentStatus
         settingService.setDailyQuestionEnabled(chatId, newStatus)
 
-        val statusText = if (newStatus) "✅ **فعال**" else "❌ **غیرفعال**"
+        val statusText = if (newStatus) "✅ *فعال*" else "❌ *غیرفعال**"
         val message = """
             🔄 **تغییر وضعیت سوال روزانه**
             

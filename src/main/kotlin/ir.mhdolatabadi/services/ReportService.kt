@@ -1,62 +1,64 @@
 package ir.mhdolatabadi.services
 
-import ir.mhdolatabadi.enums.AttendanceStatus
 import ir.mhdolatabadi.enums.ActivityStatus
+import ir.mhdolatabadi.enums.AttendanceStatus
 import ir.mhdolatabadi.models.UserAttendance
 import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
-import jakarta.persistence.EntityManagerFactory
 
 class ReportService(
-    private val emf: EntityManagerFactory,
     private val attendanceService: AttendanceService,
     private val activityService: ActivityService,
     private val memberService: MemberService
 ) {
+
     fun generateOverallActivityReport(chatId: String): String {
         val records = activityService.getAllUserActivities(chatId)
         if (records.isEmpty()) {
-            return "📊 **گزارش وضعیت توسعه/واکنش سریع**\n\nهیچ داده‌ای یافت نشد."
+            return "📊 *گزارش وضعیت توسعه/واکنش سریع/مرخصی*\n\nهیچ داده‌ای یافت نشد."
         }
 
         val members = memberService.getGroupMembers(chatId)
-        val userStats = mutableMapOf<Long, Pair<Int, Int>>()
+        val userStats = mutableMapOf<Long, MutableMap<ActivityStatus, Int>>()
 
         for (rec in records) {
-            val current = userStats.getOrPut(rec.userId) { 0 to 0 }
-            when (rec.status) {
-                ActivityStatus.DEVELOPMENT -> userStats[rec.userId] = current.first + 1 to current.second
-                ActivityStatus.QUICK_REACTION -> userStats[rec.userId] = current.first to current.second + 1
-            }
+            val stats = userStats.getOrPut(rec.userId) { mutableMapOf() }
+            stats[rec.status] = stats.getOrDefault(rec.status, 0) + 1
         }
 
         val sortedUsers = userStats.entries
             .map { entry ->
                 val userId = entry.key
-                val (devCount, reactCount) = entry.value
+                val stats = entry.value
                 val name = members[userId] ?: "کاربر $userId"
-                Triple(name, devCount, reactCount)
+                val devCount = stats[ActivityStatus.DEVELOPMENT] ?: 0
+                val reactCount = stats[ActivityStatus.QUICK_REACTION] ?: 0
+                val vacationCount = stats[ActivityStatus.VACATION] ?: 0
+                Quad(name, devCount, reactCount, vacationCount)
             }
-            .sortedBy { it.first }
+            .sortedWith(compareBy { it.name })
 
-        val totalDevDays = userStats.values.sumOf { it.first }
-        val totalReactDays = userStats.values.sumOf { it.second }
+        val totalDevUsers = sortedUsers.count { it.devCount > 0 }
+        val totalReactUsers = sortedUsers.count { it.reactCount > 0 }
+        val totalVacationUsers = sortedUsers.count { it.vacationCount > 0 }
 
         return buildString {
-            appendLine("📊 **گزارش وضعیت توسعه/واکنش سریع**")
+            appendLine("📊 *گزارش وضعیت توسعه/واکنش سریع/مرخصی*")
             appendLine("")
-            appendLine("**🔹 به‌ازای هر کاربر:**")
+            appendLine("*🔹 به‌ازای هر کاربر:*")
             appendLine("")
-            for ((name, devCount, reactCount) in sortedUsers) {
-                appendLine("👤 $name: 🛠️ ${NumberUtils.toPersianNumber(devCount)} بار | ⚡ ${NumberUtils.toPersianNumber(reactCount)} بار")
+            for ((name, devCount, reactCount, vacationCount) in sortedUsers) {
+                appendLine("👤 $name: 🛠️ ${NumberUtils.toPersianNumber(devCount)} بار | ⚡ ${NumberUtils.toPersianNumber(reactCount)} بار | 🏖️ ${NumberUtils.toPersianNumber(vacationCount)} بار")
             }
             appendLine("")
-            appendLine("**🔹 جمع کل:**")
-            appendLine("🛠️ تعداد روزهای «توسعه»: ${NumberUtils.toPersianNumber(totalDevDays)} روز")
-            appendLine("⚡ تعداد روزهای «واکنش سریع»: ${NumberUtils.toPersianNumber(totalReactDays)} روز")
+            appendLine("*🔹 جمع کل:*")
+            appendLine("🛠️ تعداد کاربران با حداقل یک «توسعه»: ${NumberUtils.toPersianNumber(totalDevUsers)} نفر")
+            appendLine("⚡ تعداد کاربران با حداقل یک «واکنش سریع»: ${NumberUtils.toPersianNumber(totalReactUsers)} نفر")
+            appendLine("🏖️ تعداد کاربران با حداقل یک «مرخصی»: ${NumberUtils.toPersianNumber(totalVacationUsers)} نفر")
         }
     }
 
+    // ==================== گزارش روزانه ترکیبی ====================
     fun generateDailyReport(chatId: String): String {
         val yesterday = DateUtils.yesterday()
         val persianDate = DateUtils.toPersianDate(yesterday)
@@ -66,7 +68,8 @@ class ReportService(
         val activityStats = activityService.getActivityStats(chatId, yesterday)
         val devCount = activityStats[ActivityStatus.DEVELOPMENT] ?: 0
         val reactCount = activityStats[ActivityStatus.QUICK_REACTION] ?: 0
-        val responded = devCount + reactCount
+        val vacationCount = activityStats[ActivityStatus.VACATION] ?: 0
+        val responded = devCount + reactCount + vacationCount
 
         val attendanceRecords = attendanceService.getAttendanceRecords(chatId, yesterday)
         var presentCount = 0
@@ -100,32 +103,18 @@ class ReportService(
             appendLine("📊 *گزارش روزانه*")
             appendLine("تاریخ: $dateStr")
             appendLine("")
-            appendLine("━━━━━━━━━━━━━━━━━━")
-            appendLine("*📋 وضعیت واکنش سریع / توسعه:*")
+            appendLine("*📋 گزارش وضعیت روزانه:*")
             appendLine("")
             appendLine("🛠️ توسعه: ${NumberUtils.toPersianNumber(devCount)} نفر")
             appendLine("⚡ واکنش سریع: ${NumberUtils.toPersianNumber(reactCount)} نفر")
+            appendLine("🏖️ مرخصی: ${NumberUtils.toPersianNumber(vacationCount)} نفر")
             appendLine("")
-            val unresponded = totalMembers - responded
-            appendLine("❌ پاسخ ندادند: ${NumberUtils.toPersianNumber(unresponded)} نفر")
+            appendLine("❌ پاسخ ندادند: ${NumberUtils.toPersianNumber(totalMembers - responded)} نفر")
             appendLine("")
-            appendLine("━━━━━━━━━━━━━━━━━━")
-            appendLine("**📋 گزارش جلسه روزانه:**")
-            appendLine("")
-            appendLine("🫡 حاضرین (${NumberUtils.toPersianNumber(presentCount)} نفر):")
-            if (presentNames.isEmpty()) appendLine("هیچ‌کس") else presentNames.forEach { appendLine("- $it") }
-            appendLine("")
-            appendLine("🔔 غایب موجه (${NumberUtils.toPersianNumber(excusedCount)} نفر):")
-            if (excusedNames.isEmpty()) appendLine("هیچ‌کس") else excusedNames.forEach { appendLine("- $it") }
-            appendLine("")
-            appendLine("🔕 غایب غیرموجه (${NumberUtils.toPersianNumber(unexcusedCount)} نفر):")
-            if (unexcusedNames.isEmpty()) appendLine("هیچ‌کس") else unexcusedNames.forEach { appendLine("- $it") }
-            appendLine("")
-            val totalAttended = presentCount + excusedCount
-            appendLine("وضعیت: ${NumberUtils.toPersianNumber(totalAttended)}/${NumberUtils.toPersianNumber(totalMembers)}")
         }
     }
 
+    // ==================== گزارش هفتگی ====================
     fun generateWeeklyReport(chatId: String, startDate: java.time.LocalDate, endDate: java.time.LocalDate): String {
         val records = attendanceService.getAttendanceReport(chatId, startDate, endDate)
         if (records.isEmpty()) {
@@ -139,17 +128,21 @@ class ReportService(
             stats[rec.status] = stats.getOrDefault(rec.status, 0) + 1
         }
 
-        val sortedUsers = userStats.entries.map { entry ->
-            val userId = entry.key
-            val stats = entry.value
-            val name = members[userId] ?: "کاربر $userId"
-            val present = stats[AttendanceStatus.PRESENT] ?: 0
-            val excused = stats[AttendanceStatus.ABSENT_EXCUSED] ?: 0
-            val unexcused = stats[AttendanceStatus.ABSENT_UNEXCUSED] ?: 0
-            UserAttendance(name, present, excused, unexcused)
-        }.sortedWith(compareByDescending<UserAttendance> { it.present }
-            .thenByDescending { it.excused }
-            .thenBy { it.name })
+        val sortedUsers = userStats.entries
+            .map { entry ->
+                val userId = entry.key
+                val stats = entry.value
+                val name = members[userId] ?: "کاربر $userId"
+                val present = stats[AttendanceStatus.PRESENT] ?: 0
+                val excused = stats[AttendanceStatus.ABSENT_EXCUSED] ?: 0
+                val unexcused = stats[AttendanceStatus.ABSENT_UNEXCUSED] ?: 0
+                UserAttendance(name, present, excused, unexcused)
+            }
+            .sortedWith(
+                compareByDescending<UserAttendance> { it.present }
+                    .thenByDescending { it.excused }
+                    .thenBy { it.name }
+            )
 
         val report = StringBuilder()
         for (user in sortedUsers) {
@@ -160,4 +153,11 @@ class ReportService(
         }
         return report.toString()
     }
+
+    private data class Quad(
+        val name: String,
+        val devCount: Int,
+        val reactCount: Int,
+        val vacationCount: Int
+    )
 }

@@ -39,8 +39,8 @@ class ActivityService(private val emf: EntityManagerFactory) {
     }
 
     fun hasActivityToday(chatId: String, date: LocalDate): Boolean {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val count = em.createQuery(
                 "SELECT COUNT(a) FROM DailyActivity a WHERE a.chatId = :chatId AND a.date = :date",
                 Long::class.java
@@ -48,31 +48,12 @@ class ActivityService(private val emf: EntityManagerFactory) {
                 .setParameter("date", date)
                 .singleResult
             return count > 0
-        } finally {
-            em.close()
-        }
-    }
-
-    fun hasUserRespondedToday(chatId: String, userId: Long): Boolean {
-        val em = emf.createEntityManager()
-        try {
-            val today = LocalDate.now()
-            val count = em.createQuery(
-                "SELECT COUNT(a) FROM DailyActivity a WHERE a.chatId = :chatId AND a.userId = :userId AND a.date = :date",
-                Long::class.java
-            ).setParameter("chatId", chatId.toLong())
-                .setParameter("userId", userId)
-                .setParameter("date", today)
-                .singleResult
-            return count > 0
-        } finally {
-            em.close()
         }
     }
 
     fun getUserTodayStatus(chatId: String, userId: Long): ActivityStatus? {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val today = LocalDate.now()
             val result = em.createQuery(
                 "SELECT a.status FROM DailyActivity a WHERE a.chatId = :chatId AND a.userId = :userId AND a.date = :date",
@@ -82,8 +63,6 @@ class ActivityService(private val emf: EntityManagerFactory) {
                 .setParameter("date", today)
                 .resultList.firstOrNull()
             return result
-        } finally {
-            em.close()
         }
     }
 
@@ -127,8 +106,8 @@ class ActivityService(private val emf: EntityManagerFactory) {
     }
 
     fun getTodayActivities(chatId: String): Map<Long, ActivityStatus> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val today = LocalDate.now()
             val results = em.createQuery(
                 "SELECT a.userId, a.status FROM DailyActivity a WHERE a.chatId = :chatId AND a.date = :date",
@@ -137,14 +116,12 @@ class ActivityService(private val emf: EntityManagerFactory) {
                 .setParameter("date", today)
                 .resultList
             return results.associate { it[0] as Long to it[1] as ActivityStatus }
-        } finally {
-            em.close()
         }
     }
 
     fun getActivityStats(chatId: String, date: LocalDate): Map<ActivityStatus, Long> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val results = em.createQuery(
                 "SELECT a.status, COUNT(a) FROM DailyActivity a WHERE a.chatId = :chatId AND a.date = :date GROUP BY a.status",
                 Array<Any>::class.java
@@ -159,21 +136,17 @@ class ActivityService(private val emf: EntityManagerFactory) {
                 stats[status] = count
             }
             return stats
-        } finally {
-            em.close()
         }
     }
 
     fun getAllUserActivities(chatId: String): List<DailyActivity> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             return em.createQuery(
                 "SELECT a FROM DailyActivity a WHERE a.chatId = :chatId ORDER BY a.userId, a.date",
                 DailyActivity::class.java
             ).setParameter("chatId", chatId.toLong())
                 .resultList
-        } finally {
-            em.close()
         }
     }
 }

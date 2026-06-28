@@ -32,8 +32,8 @@ class AttendanceService(private val emf: EntityManagerFactory) {
     }
 
     fun hasAttendanceToday(chatId: String, date: LocalDate): Boolean {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val count = em.createQuery(
                 "SELECT COUNT(a) FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date = :date",
                 Long::class.java
@@ -41,22 +41,18 @@ class AttendanceService(private val emf: EntityManagerFactory) {
                 .setParameter("date", date)
                 .singleResult
             return count > 0
-        } finally {
-            em.close()
         }
     }
 
     fun getAttendanceRecords(chatId: String, date: LocalDate): List<AttendanceRecord> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             return em.createQuery(
                 "SELECT a FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date = :date",
                 AttendanceRecord::class.java
             ).setParameter("chatId", chatId.toLong())
                 .setParameter("date", date)
                 .resultList
-        } finally {
-            em.close()
         }
     }
 

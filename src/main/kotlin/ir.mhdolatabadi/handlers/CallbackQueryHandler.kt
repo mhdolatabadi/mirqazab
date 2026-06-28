@@ -24,7 +24,6 @@ class CallbackQueryHandler(
     private val resetConfirmations = mutableMapOf<String, Long>()
     private val candidateSelections = mutableMapOf<String, MutableSet<Long>>()
 
-    // ==================== ساخت پیام وضعیت روزانه ====================
     fun buildActivityMessage(chatId: String): Pair<String, InlineKeyboardMarkup> {
         val today = DateUtils.today()
         val persianDate = DateUtils.toPersianDate(today)
@@ -34,20 +33,22 @@ class CallbackQueryHandler(
         val members = memberService.getGroupMembers(chatId)
 
         val messageText = buildString {
-            appendLine("📋 **ثبت وضعیت روزانه**")
+            appendLine("📋 *ثبت وضعیت روزانه*")
             appendLine("تاریخ: $dateStr")
             appendLine("")
-            appendLine("امروز چه نوع فعالیتی داشتید؟")
-            appendLine("لطفاً یکی از گزینه‌های زیر را انتخاب کنید:")
+            appendLine("امروز توسعه بودی یا واکنش سریع؟")
             appendLine("")
             if (todayActivities.isEmpty()) {
                 appendLine("📭 هنوز کسی پاسخی نداده است.")
             } else {
-                appendLine("**📊 لیست پاسخ‌ها:**")
+                appendLine("*📊 لیست پاسخ‌ها:*")
                 for ((userId, status) in todayActivities) {
                     val name = members[userId] ?: "کاربر $userId"
-                    val emoji = if (status == ActivityStatus.DEVELOPMENT) "🛠️" else "⚡"
-                    val statusName = if (status == ActivityStatus.DEVELOPMENT) "توسعه" else "واکنش سریع"
+                    val (emoji, statusName) = when (status) {
+                        ActivityStatus.DEVELOPMENT -> "🛠️" to "توسعه"
+                        ActivityStatus.QUICK_REACTION -> "⚡" to "واکنش سریع"
+                        ActivityStatus.VACATION -> "🏖️" to "مرخصی"
+                    }
                     appendLine("• $name: $emoji $statusName")
                 }
             }
@@ -61,7 +62,11 @@ class CallbackQueryHandler(
             text = "⚡ واکنش سریع"
             callbackData = "activity_quick_reaction"
         }
-        val keyboard = InlineKeyboardMarkup(listOf(listOf(devBtn, reactBtn)))
+        val vacationBtn = InlineKeyboardButton().apply {
+            text = "🏖️ مرخصی"
+            callbackData = "activity_vacation"
+        }
+        val keyboard = InlineKeyboardMarkup(listOf(listOf(devBtn, reactBtn, vacationBtn)))
 
         return Pair(messageText, keyboard)
     }
@@ -74,14 +79,15 @@ class CallbackQueryHandler(
         val userId = callback.from.id
 
         when {
-            // ==================== ثبت وضعیت روزانه (توسعه/واکنش سریع) ====================
-            data == "activity_development" || data == "activity_quick_reaction" -> {
-                val newStatus = if (data == "activity_development") ActivityStatus.DEVELOPMENT else ActivityStatus.QUICK_REACTION
+            data == "activity_development" || data == "activity_quick_reaction" || data == "activity_vacation" -> {
+                val newStatus = when (data) {
+                    "activity_development" -> ActivityStatus.DEVELOPMENT
+                    "activity_quick_reaction" -> ActivityStatus.QUICK_REACTION
+                    else -> ActivityStatus.VACATION
+                }
 
-                // دریافت وضعیت فعلی کاربر
                 val currentStatus = activityService.getUserTodayStatus(chatId, userId)
 
-                // اعمال تغییرات
                 when (currentStatus) {
                     null -> {
                         activityService.saveDailyActivity(chatId, userId, newStatus)
@@ -95,10 +101,8 @@ class CallbackQueryHandler(
                     }
                 }
 
-                // ساخت پیام به‌روز
                 val (text, keyboard) = buildActivityMessage(chatId)
 
-                // ویرایش پیام اصلی
                 val edit = EditMessageText().apply {
                     this.chatId = chatId
                     this.messageId = currentMsgId
@@ -108,7 +112,6 @@ class CallbackQueryHandler(
                 }
                 bot.execute(edit)
 
-                // نمایش نوتیفیکیشن به کاربر
                 val answer = AnswerCallbackQuery().apply {
                     this.callbackQueryId = callback.id
                     this.text = when (currentStatus) {
@@ -121,7 +124,7 @@ class CallbackQueryHandler(
                 bot.execute(answer)
             }
 
-            // ==================== ریست وضعیت جلسه امروز ====================
+            // ==================== ادامه کدهای قبلی ====================
             data == "reset_today_attendance" -> {
                 resetConfirmations[chatId] = userId
                 val confirmBtn = InlineKeyboardButton().apply {
@@ -136,7 +139,7 @@ class CallbackQueryHandler(
                 val edit = EditMessageText().apply {
                     this.chatId = chatId
                     this.messageId = currentMsgId
-                    this.text = "⚠️ **هشدار!**\n\nآیا مطمئن هستید که می‌خواهید تمام رکوردهای حضور/غیاب امروز را ریست کنید؟\n\nاین عمل غیرقابل بازگشت است."
+                    this.text = "⚠️ *هشدار!*\n\nآیا مطمئن هستید که می‌خواهید تمام رکوردهای حضور/غیاب امروز را ریست کنید؟\n\nاین عمل غیرقابل بازگشت است."
                     this.replyMarkup = keyboard
                     this.parseMode = "Markdown"
                 }
@@ -165,12 +168,11 @@ class CallbackQueryHandler(
                 showMainMenuOnExistingMessage(chatId, currentMsgId)
             }
 
-            // ==================== گزارش وضعیت توسعه/واکنش سریع ====================
             data == "overall_activity_report" -> {
                 val loadingMsg = EditMessageText().apply {
                     this.chatId = chatId
                     this.messageId = currentMsgId
-                    this.text = "📊 در حال تولید گزارش وضعیت توسعه/واکنش سریع... لطفاً چند لحظه صبر کنید."
+                    this.text = "📊 در حال تولید گزارش وضعیت توسعه/واکنش سریع/مرخصی... لطفاً چند لحظه صبر کنید."
                     this.replyMarkup = null
                 }
                 bot.execute(loadingMsg)
@@ -185,7 +187,6 @@ class CallbackQueryHandler(
                 bot.execute(edit)
             }
 
-            // ==================== پاک کردن پاسخ‌ها و ارسال مجدد سوال ====================
             data == "reset_and_resend_question" -> {
                 activityService.deleteAllTodayActivities(chatId)
 
@@ -211,10 +212,8 @@ class CallbackQueryHandler(
                 bot.execute(msg)
             }
 
-            // ==================== گزینه‌های دیگر ====================
             data == "random_mirghazab_menu" -> showCandidateSelection(chatId, currentMsgId)
             data == "daily_report" -> {
-                // بررسی اینکه آیا امروز گزارش ثبت شده است
                 val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
                 if (hasAttendanceToday) {
                     val answer = AnswerCallbackQuery().apply {
@@ -226,7 +225,6 @@ class CallbackQueryHandler(
                     return
                 }
 
-                // بررسی اینکه آیا جلسه فعالی در حال اجراست
                 val activeSession = sessionManager.getActiveSession(chatId)
                 if (activeSession != null) {
                     val answer = AnswerCallbackQuery().apply {
@@ -313,7 +311,7 @@ class CallbackQueryHandler(
         }
     }
 
-    // ==================== انتخاب کاندیدا (میرغضب رندوم) ====================
+    // ==================== توابع کمکی (بدون تغییر) ====================
     private fun showCandidateSelection(chatId: String, messageId: Int) {
         val members = memberService.getGroupMembers(chatId)
         if (members.isEmpty()) {
@@ -332,7 +330,7 @@ class CallbackQueryHandler(
         val edit = EditMessageText().apply {
             this.chatId = chatId
             this.messageId = messageId
-            this.text = "✅ اعضای کاندید برای انتخاب میرغضب (با کلیک می‌توانید حذف/افزودن کنید):\n\n📊 تعداد دفعات میرغضب شدن قبلی در کنار هر نام آمده است."
+            this.text = "کیا می‌تونن میرغضب وایستن؟"
             this.replyMarkup = keyboard
         }
         bot.execute(edit)
@@ -356,7 +354,7 @@ class CallbackQueryHandler(
             rows.add(listOf(button))
         }
         val randomBtn = InlineKeyboardButton().apply {
-            text = "🎲 انتخاب رندوم از کاندیدها"
+            text = "🎲 شانسی انتخاب کن"
             callbackData = "do_random_from_candidates"
         }
         val cancelBtn = InlineKeyboardButton().apply {
@@ -388,7 +386,7 @@ class CallbackQueryHandler(
             val edit = EditMessageText().apply {
                 this.chatId = chatId
                 this.messageId = messageId
-                this.text = "⚠️ هیچ کاندیدی انتخاب نشده است. لطفاً حداقل یک عضو را انتخاب کنید."
+                this.text = "⚠️ هیچکس انتخاب نشده است.ً حداقل یک نفر را انتخاب کن"
                 this.replyMarkup = buildCandidateKeyboard(chatId, messageId)
             }
             bot.execute(edit)
@@ -403,7 +401,7 @@ class CallbackQueryHandler(
         val edit = EditMessageText().apply {
             this.chatId = chatId
             this.messageId = messageId
-            this.text = "🎭 میرغضب امروز: **$name**\n\nاین کاربر $newCountPersian بار میرغضب شده است."
+            this.text = "🎭 میرغضب امروز: *$name*\n\nتا حالا $newCountPersian بار میرغضب شده است."
             this.replyMarkup = null
             this.parseMode = "Markdown"
         }
@@ -416,7 +414,6 @@ class CallbackQueryHandler(
         showMainMenuOnExistingMessage(chatId, messageId)
     }
 
-    // ==================== نمایش منوی اصلی ====================
     private fun showMainMenuOnExistingMessage(chatId: String, messageId: Int) {
         val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
         val randomBtn = InlineKeyboardButton().apply {
@@ -436,7 +433,7 @@ class CallbackQueryHandler(
             callbackData = "weekly_report_now"
         }
         val overallBtn = InlineKeyboardButton().apply {
-            text = "📊 مشاهده وضعیت توسعه/واکنش سریع"
+            text = "📊 مشاهده وضعیت توسعه/واکنش سریع/مرخصی"
             callbackData = "overall_activity_report"
         }
         val resetBtn = InlineKeyboardButton().apply {
@@ -453,7 +450,7 @@ class CallbackQueryHandler(
         val edit = EditMessageText().apply {
             this.chatId = chatId
             this.messageId = messageId
-            this.text = "لطفاً انتخاب کنید:"
+            this.text = "انتخاب کن:"
             this.replyMarkup = keyboard
         }
         bot.execute(edit)

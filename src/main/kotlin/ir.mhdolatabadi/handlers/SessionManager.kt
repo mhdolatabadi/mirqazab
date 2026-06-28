@@ -22,7 +22,6 @@ class SessionManager(
     fun getActiveSession(chatId: String): StatusSession? = activeSessions[chatId]
 
     fun startSession(chatId: String, messageId: Int, initiatorUserId: Long): StatusSession? {
-        // بررسی اینکه آیا امروز گزارش ثبت شده است
         if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) {
             val edit = EditMessageText().apply {
                 this.chatId = chatId
@@ -34,7 +33,6 @@ class SessionManager(
             return null
         }
 
-        // بررسی اینکه آیا جلسه فعالی در حال اجراست
         if (activeSessions.containsKey(chatId)) {
             val edit = EditMessageText().apply {
                 this.chatId = chatId
@@ -63,7 +61,7 @@ class SessionManager(
         val edit = EditMessageText().apply {
             this.chatId = chatId
             this.messageId = messageId
-            this.text = "مرحله ۱: چه کسانی در جلسه **حاضر** هستند؟\n(روی اسامی کلیک کنید)"
+            this.text = "کیا تو جلسه حضور داشتن؟"
             this.replyMarkup = keyboard
             this.parseMode = "Markdown"
         }
@@ -83,13 +81,13 @@ class SessionManager(
         } else {
             user.status = if (user.status == AttendanceStatus.ABSENT_EXCUSED) AttendanceStatus.UNKNOWN else AttendanceStatus.ABSENT_EXCUSED
         }
-        updateSessionMessage(chatId, if (session.state == "present") "مرحله ۱: چه کسانی در جلسه **حاضر** هستند؟" else "مرحله ۲: چه کسانی **غایب موجه** هستند؟")
+        updateSessionMessage(chatId, if (session.state == "present") "کیا تو جلسه حاضر بودن؟" else "کیا خبر داده بودن؟")
     }
 
     fun advanceSession(chatId: String) {
         val session = activeSessions[chatId] ?: return
         session.state = "absent_excused"
-        updateSessionMessage(chatId, "مرحله ۲: چه کسانی **غایب موجه** هستند؟")
+        updateSessionMessage(chatId, "کیا خبر داده بودن؟")
     }
 
     fun finishSession(chatId: String): StatusSession? {
@@ -173,7 +171,7 @@ class SessionManager(
             }
         }
         if (currentRow.isNotEmpty()) rows.add(currentRow)
-        val doneText = if (state == "present") "➡️ تایید حاضران و مرحله بعد" else "✔️ تایید نهایی و ارسال گزارش"
+        val doneText = if (state == "present") "➡️ همینا بودن" else "✔️ بفرست بره"
         val doneButton = InlineKeyboardButton().apply {
             text = doneText
             callbackData = if (state == "present") "done_present" else "done_final"

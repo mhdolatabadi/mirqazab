@@ -5,12 +5,10 @@ import jakarta.persistence.EntityManagerFactory
 
 class SettingService(private val emf: EntityManagerFactory) {
     fun isDailyQuestionEnabled(chatId: String): Boolean {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val setting = em.find(ChatSetting::class.java, chatId.toLong())
             return setting?.dailyQuestionEnabled ?: true
-        } finally {
-            em.close()
         }
     }
 

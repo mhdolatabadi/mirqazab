@@ -17,24 +17,20 @@ class MemberService(private val emf: EntityManagerFactory) {
     }
 
     fun getAllChatIds(): List<Long> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             return em.createQuery("SELECT DISTINCT m.chatId FROM GroupMember m", Long::class.java).resultList
-        } finally {
-            em.close()
         }
     }
 
     fun getMirGhazabCounts(chatId: String): Map<Long, Int> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             val members = em.createQuery(
                 "SELECT m FROM GroupMember m WHERE m.chatId = :chatId",
                 GroupMember::class.java
             ).setParameter("chatId", chatId.toLong()).resultList
             return members.associate { it.userId to it.mirGhazabCount }
-        } finally {
-            em.close()
         }
     }
 
@@ -93,18 +89,4 @@ class MemberService(private val emf: EntityManagerFactory) {
         }
     }
 
-    fun getMemberName(chatId: String, userId: Long): String? {
-        val em = emf.createEntityManager()
-        try {
-            val member = em.createQuery(
-                "SELECT m FROM GroupMember m WHERE m.chatId = :chatId AND m.userId = :userId",
-                GroupMember::class.java
-            ).setParameter("chatId", chatId.toLong())
-                .setParameter("userId", userId)
-                .resultList.firstOrNull()
-            return member?.name
-        } finally {
-            em.close()
-        }
-    }
 }

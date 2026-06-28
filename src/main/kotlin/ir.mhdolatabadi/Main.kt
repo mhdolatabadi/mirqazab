@@ -10,7 +10,6 @@ fun main() {
     val botOptions = DefaultBotOptions().apply {
         baseUrl = BotConfig.baseUrl
     }
-    // Initialize bot
     val properties = mapOf(
         "jakarta.persistence.jdbc.url" to BotConfig.dbUrl,
         "jakarta.persistence.jdbc.user" to BotConfig.dbUser,
