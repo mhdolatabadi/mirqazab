@@ -10,6 +10,8 @@
 
         <class>ir.mhdolatabadi.entities.AttendanceRecord</class>
         <class>ir.mhdolatabadi.entities.GroupMember</class>
+        <class>ir.mhdolatabadi.entities.DailyActivity</class>
+        <class>ir.mhdolatabadi.entities.ChatSetting</class>
 
         <properties>
             <property name="hibernate.connection.provider_class"
