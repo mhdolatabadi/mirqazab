@@ -1,17 +1,20 @@
 package ir.mhdolatabadi
 
-import ir.mhdolatabadi.handlers.CallbackQueryHandler
+import ir.mhdolatabadi.handlers.ReactionRouter
 import ir.mhdolatabadi.handlers.SessionManager
 import ir.mhdolatabadi.matrix.MatrixClient
 import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.scheduler.DailyScheduler
 import ir.mhdolatabadi.services.*
+import ir.mhdolatabadi.utils.logger
 import jakarta.persistence.EntityManagerFactory
 
 class DailyBot(
     client: MatrixClient,
     entityManagerFactory: EntityManagerFactory
 ) : MatrixLongPollingBot(client) {
+
+    private val log = logger()
 
     private val memberService = MemberService(entityManagerFactory)
     private val attendanceService = AttendanceService(entityManagerFactory)
@@ -26,7 +29,7 @@ class DailyBot(
 
     private val sessionManager = SessionManager(this, memberService, attendanceService)
 
-    private val callbackQueryHandler = CallbackQueryHandler(
+    private val reactionRouter = ReactionRouter(
         this,
         sessionManager,
         activityService,
@@ -42,7 +45,7 @@ class DailyBot(
         attendanceService,
         memberService,
         settingService,
-        callbackQueryHandler
+        reactionRouter
     )
 
     fun startBot() {
@@ -55,16 +58,16 @@ class DailyBot(
             recordUserActivity(roomId, senderId)
             handleTextMessage(roomId, senderId, body)
         } catch (e: Exception) {
-            e.printStackTrace()
+            log.error("Failed handling message in {}", roomId, e)
         }
     }
 
     override fun onReaction(roomId: String, senderId: String, targetEventId: String, key: String) {
         try {
             recordUserActivity(roomId, senderId)
-            callbackQueryHandler.handleReaction(roomId, senderId, targetEventId, key)
+            reactionRouter.handleReaction(roomId, senderId, targetEventId, key)
         } catch (e: Exception) {
-            e.printStackTrace()
+            log.error("Failed handling reaction in {}", roomId, e)
         }
     }
 
@@ -86,7 +89,7 @@ class DailyBot(
                     try {
                         scheduler.sendDailyQuestionNow(chatId)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        log.error("Failed sending activity question to {}", chatId, e)
                         notify(chatId, "❌ خطا در ارسال سوال فوری: ${e.message}")
                     }
                 }
@@ -94,7 +97,7 @@ class DailyBot(
                     try {
                         scheduler.sendDailyReportNow(chatId)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        log.error("Failed sending daily report to {}", chatId, e)
                         notify(chatId, "❌ خطا در ارسال گزارش فوری: ${e.message}")
                     }
                 }
@@ -108,7 +111,7 @@ class DailyBot(
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            log.error("Failed handling text command in {}", chatId, e)
             notify(chatId, "❌ خطا: ${e.message}")
         }
     }
@@ -143,16 +146,16 @@ class DailyBot(
         .replace(Regex("\\s+"), " ").trim()
 
     private fun showMainMenu(chatId: String) {
-        val text = callbackQueryHandler.buildMainMenuText(chatId)
+        val text = reactionRouter.buildMainMenuText(chatId)
         val eventId = sendMessage(chatId, text)
-        reactAll(chatId, eventId, callbackQueryHandler.mainMenuKeys())
+        reactAll(chatId, eventId, reactionRouter.mainMenuKeys())
     }
 
     private fun notify(chatId: String, text: String) {
         try {
             sendMessage(chatId, text)
         } catch (e: Exception) {
-            println("ارسال پیام به $chatId ناموفق: ${e.message}")
+            log.warn("Failed sending message to {}: {}", chatId, e.message)
         }
     }
 }

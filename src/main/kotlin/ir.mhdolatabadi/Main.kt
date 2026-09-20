@@ -3,6 +3,9 @@ package ir.mhdolatabadi
 import ir.mhdolatabadi.config.BotConfig
 import ir.mhdolatabadi.matrix.MatrixClient
 import jakarta.persistence.Persistence
+import org.slf4j.LoggerFactory
+
+private val log = LoggerFactory.getLogger("ir.mhdolatabadi.Main")
 
 fun main() {
     val properties = mapOf(
@@ -22,10 +25,9 @@ fun main() {
     val bot = DailyBot(client, emf)
     bot.startBot()
 
-    println("✅ Bot started successfully with database persistence")
+    log.info("Bot started successfully with database persistence")
 
-    // Graceful shutdown
     Runtime.getRuntime().addShutdownHook(Thread {
-        println("Shutting down...")
+        log.info("Shutting down...")
     })
 }

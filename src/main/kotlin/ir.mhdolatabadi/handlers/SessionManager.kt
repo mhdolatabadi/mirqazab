@@ -10,9 +10,6 @@ import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
 import ir.mhdolatabadi.utils.ReactionKeys
 
-private const val DONE_PRESENT_KEY = "➡️"
-private const val DONE_FINAL_KEY = "✔️"
-
 class SessionManager(
     private val bot: MatrixLongPollingBot,
     private val memberService: MemberService,
@@ -21,6 +18,23 @@ class SessionManager(
     private val activeSessions = mutableMapOf<String, StatusSession>()
 
     fun getActiveSession(chatId: String): StatusSession? = activeSessions[chatId]
+
+    fun isSessionMessage(chatId: String, eventId: String): Boolean =
+        activeSessions[chatId]?.rootEventId == eventId
+
+    fun handleReaction(chatId: String, senderId: String, key: String) {
+        val session = activeSessions[chatId] ?: return
+        if (senderId != session.initiatorUserId) return
+        when (key) {
+            KEY_SESSION_DONE_PRESENT -> advanceSession(chatId)
+            KEY_SESSION_DONE_FINAL -> finishSession(chatId)
+            else -> {
+                val targetUserId = session.orderedUserIds.withIndex()
+                    .firstOrNull { (i, _) -> ReactionKeys.forIndex(i + 1) == key }?.value
+                if (targetUserId != null) toggleUserStatus(chatId, targetUserId)
+            }
+        }
+    }
 
     fun startSession(chatId: String, rootEventId: String, initiatorUserId: String): StatusSession? {
         if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) {
@@ -52,7 +66,7 @@ class SessionManager(
 
         val text = buildStatusText(session, "کیا تو جلسه حضور داشتن؟")
         bot.editMessage(chatId, rootEventId, text)
-        val keys = orderedUserIds.indices.map { ReactionKeys.forIndex(it + 1) } + DONE_PRESENT_KEY
+        val keys = orderedUserIds.indices.map { ReactionKeys.forIndex(it + 1) } + KEY_SESSION_DONE_PRESENT
         bot.reactAll(chatId, rootEventId, keys)
 
         return session
@@ -76,7 +90,7 @@ class SessionManager(
         val session = activeSessions[chatId] ?: return
         session.state = "absent_excused"
         bot.editMessage(chatId, session.rootEventId, buildStatusText(session, "کیا خبر داده بودن؟"))
-        bot.react(chatId, session.rootEventId, DONE_FINAL_KEY)
+        bot.react(chatId, session.rootEventId, KEY_SESSION_DONE_FINAL)
     }
 
     fun finishSession(chatId: String): StatusSession? {
@@ -134,9 +148,9 @@ class SessionManager(
         }
         appendLine()
         if (session.state == "present") {
-            appendLine("$DONE_PRESENT_KEY = همینا بودن، برو مرحله بعد")
+            appendLine("$KEY_SESSION_DONE_PRESENT = همینا بودن، برو مرحله بعد")
         } else {
-            appendLine("$DONE_FINAL_KEY = بفرست بره")
+            appendLine("$KEY_SESSION_DONE_FINAL = بفرست بره")
         }
     }
 }

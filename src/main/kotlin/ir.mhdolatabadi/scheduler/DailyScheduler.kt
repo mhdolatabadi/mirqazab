@@ -1,10 +1,11 @@
 package ir.mhdolatabadi.scheduler
 
-import ir.mhdolatabadi.handlers.CallbackQueryHandler
+import ir.mhdolatabadi.handlers.ReactionRouter
 import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.services.*
 import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
+import ir.mhdolatabadi.utils.logger
 import kotlinx.coroutines.*
 import java.time.Duration
 import java.time.LocalDateTime
@@ -17,8 +18,9 @@ class DailyScheduler(
     private val attendanceService: AttendanceService,
     private val memberService: MemberService,
     private val settingService: SettingService,
-    private val callbackQueryHandler: CallbackQueryHandler
+    private val reactionRouter: ReactionRouter
 ) {
+    private val log = logger()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val tehranZone = ZoneId.of("Asia/Tehran")
 
@@ -75,7 +77,7 @@ class DailyScheduler(
             try {
                 bot.sendMessage(chatId, report)
             } catch (e: Exception) {
-                println("ارسال گزارش به $chatId ناموفق: ${e.message}")
+                log.warn("Failed sending daily report to {}: {}", chatId, e.message)
             }
         }
     }
@@ -84,7 +86,7 @@ class DailyScheduler(
         val report = reportService.generateDailyReport(chatId)
         val fullMessage = "📊 گزارش روزانه (ارسال فوری)\n\n$report"
         bot.sendMessage(chatId, fullMessage)
-        println("✅ گزارش فوری به $chatId ارسال شد.")
+        log.info("Sent on-demand daily report to {}", chatId)
     }
 
     private fun sendDailyReminder() {
@@ -99,7 +101,7 @@ class DailyScheduler(
                 try {
                     bot.sendMessage(chatId, message)
                 } catch (e: Exception) {
-                    println("ارسال یادآوری به $chatId ناموفق: ${e.message}")
+                    log.warn("Failed sending reminder to {}: {}", chatId, e.message)
                 }
             }
         }
@@ -140,7 +142,7 @@ class DailyScheduler(
             try {
                 bot.sendMessage(chatId, fullMessage)
             } catch (e: Exception) {
-                println("ارسال گزارش هفتگی به $chatId ناموفق: ${e.message}")
+                log.warn("Failed sending weekly report to {}: {}", chatId, e.message)
             }
         }
     }
@@ -165,7 +167,7 @@ class DailyScheduler(
             try {
                 bot.sendMessage(chatId, fullMessage)
             } catch (e: Exception) {
-                println("ارسال گزارش ماهانه به $chatId ناموفق: ${e.message}")
+                log.warn("Failed sending monthly report to {}: {}", chatId, e.message)
             }
         }
     }
@@ -179,11 +181,11 @@ class DailyScheduler(
             if (!settingService.isDailyQuestionEnabled(chatId)) continue
             if (activityService.hasActivityOn(chatId, today)) continue
 
-            callbackQueryHandler.sendActivityMessage(chatId, today)
+            reactionRouter.sendActivityMessage(chatId, today)
         }
     }
 
     fun sendDailyQuestionNow(chatId: String) {
-        callbackQueryHandler.sendActivityMessage(chatId, DateUtils.today())
+        reactionRouter.sendActivityMessage(chatId, DateUtils.today())
     }
 }

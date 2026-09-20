@@ -1,5 +1,6 @@
 package ir.mhdolatabadi.matrix
 
+import ir.mhdolatabadi.utils.logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -11,6 +12,8 @@ import kotlinx.coroutines.launch
  * Mirrors the role TelegramLongPollingBot played before the Matrix migration.
  */
 abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
+
+    private val log = logger()
 
     lateinit var selfUserId: String
         private set
@@ -34,7 +37,7 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
 
                 for (roomId in response.rooms.invite.keys) {
                     runCatching { client.joinRoom(roomId) }
-                        .onFailure { it.printStackTrace() }
+                        .onFailure { log.error("Failed joining room {}", roomId, it) }
                 }
 
                 for ((roomId, joinedRoom) in response.rooms.join) {
@@ -44,7 +47,7 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                log.error("Sync loop iteration failed, retrying", e)
                 delay(5_000)
             }
         }
@@ -67,7 +70,7 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            log.error("Failed dispatching {} event in {}", event.type, roomId, e)
         }
     }
 
@@ -78,7 +81,7 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
 
     fun react(roomId: String, targetEventId: String, key: String) {
         runCatching { client.sendReaction(roomId, targetEventId, key) }
-            .onFailure { it.printStackTrace() }
+            .onFailure { log.error("Failed reacting {} to {} in {}", key, targetEventId, roomId, it) }
     }
 
     fun reactAll(roomId: String, targetEventId: String, keys: List<String>) {
