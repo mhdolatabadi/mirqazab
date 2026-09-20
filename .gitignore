@@ -43,3 +43,4 @@ bin/
 
 ### Secrets ###
 src/main/resources/application.properties
+.env

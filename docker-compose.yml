@@ -21,6 +21,8 @@ services:
     image: dailybot:latest
     container_name: dailybot
     restart: unless-stopped
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
