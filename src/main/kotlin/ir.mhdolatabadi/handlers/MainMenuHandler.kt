@@ -9,14 +9,17 @@ import ir.mhdolatabadi.utils.NumberUtils
 /**
  * Owns the "لطفاً انتخاب کنید" root menu message: its text/reaction-legend,
  * the weekly/overall report actions, and the reset-attendance confirm/cancel
- * flow (which reuses the same message).
+ * flow (which reuses the same message - safe since ✅/❌ aren't reused by any
+ * other flow sharing this event id). Candidate-selection and the roll-call
+ * session get their own fresh messages instead of being edited in here, so
+ * their reaction keys don't collide with a key the user already used on this one.
  */
 class MainMenuHandler(
     private val bot: MatrixLongPollingBot,
     private val attendanceService: AttendanceService,
     private val reportService: ReportService,
-    private val onOpenCandidateSelection: (chatId: String, eventId: String) -> Unit,
-    private val onStartSession: (chatId: String, eventId: String, senderId: String) -> Unit,
+    private val onOpenCandidateSelection: (chatId: String) -> Unit,
+    private val onStartSession: (chatId: String, senderId: String) -> Unit,
     private val onResetAttendance: (chatId: String) -> Unit
 ) {
     private val resetConfirmations = mutableMapOf<String, Pair<String, String>>() // chatId -> (initiatorUserId, eventId)
@@ -54,12 +57,15 @@ class MainMenuHandler(
         }
 
         when (key) {
-            KEY_RANDOM_MIRGHAZAB -> onOpenCandidateSelection(chatId, eventId)
+            KEY_RANDOM_MIRGHAZAB -> {
+                bot.editMessage(chatId, eventId, "$KEY_RANDOM_MIRGHAZAB لیست کاندیداها در پیام بعدی ارسال شد.")
+                onOpenCandidateSelection(chatId)
+            }
 
             KEY_DAILY_REPORT -> {
                 if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) return
-                bot.editMessage(chatId, eventId, "🔄 شروع فرایند گزارش جلسه...")
-                onStartSession(chatId, eventId, senderId)
+                bot.editMessage(chatId, eventId, "🔄 شروع فرایند گزارش جلسه در پیام بعدی...")
+                onStartSession(chatId, senderId)
             }
 
             KEY_WEEKLY_REPORT -> {

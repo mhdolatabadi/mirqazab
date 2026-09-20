@@ -10,6 +10,13 @@ import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
 import ir.mhdolatabadi.utils.ReactionKeys
 
+/**
+ * Runs the roll-call session on its own message (sent by [startSession], not
+ * an edit of the caller's message) so its numbered-keycap reactions never
+ * collide with a key the same user already used on a different flow sharing
+ * that event id - Matrix reactions are per (user, key, event), so a repeat
+ * key would just un-react instead of firing again.
+ */
 class SessionManager(
     private val bot: MatrixLongPollingBot,
     private val memberService: MemberService,
@@ -36,18 +43,18 @@ class SessionManager(
         }
     }
 
-    fun startSession(chatId: String, rootEventId: String, initiatorUserId: String): StatusSession? {
+    fun startSession(chatId: String, initiatorUserId: String): StatusSession? {
         if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) {
-            bot.editMessage(
-                chatId, rootEventId,
+            bot.sendMessage(
+                chatId,
                 "⚠️ گزارش جلسه امروز قبلاً ثبت شده است.\nبرای ثبت مجدد ابتدا از دکمه «حذف گزارش جلسه روزانه امروز» استفاده کنید."
             )
             return null
         }
 
         if (activeSessions.containsKey(chatId)) {
-            bot.editMessage(
-                chatId, rootEventId,
+            bot.sendMessage(
+                chatId,
                 "⚠️ در حال حاضر یک جلسه گزارش در این گروه در حال اجراست.\nلطفاً ابتدا آن را تکمیل کنید."
             )
             return null
@@ -55,12 +62,14 @@ class SessionManager(
 
         val members = memberService.getGroupMembers(chatId)
         if (members.isEmpty()) {
-            bot.editMessage(chatId, rootEventId, "هنوز هیچ عضوی شناسایی نشده است. لطفاً اعضا یک پیام بفرستند.")
+            bot.sendMessage(chatId, "هنوز هیچ عضوی شناسایی نشده است. لطفاً اعضا یک پیام بفرستند.")
             return null
         }
 
         val orderedUserIds = members.keys.toList()
         val sessionUsers = members.mapValues { UserInfo(it.key, it.value) }.toMutableMap()
+
+        val rootEventId = bot.sendMessage(chatId, "در حال آماده‌سازی...")
         val session = StatusSession(rootEventId, sessionUsers, orderedUserIds, "present", initiatorUserId)
         activeSessions[chatId] = session
 

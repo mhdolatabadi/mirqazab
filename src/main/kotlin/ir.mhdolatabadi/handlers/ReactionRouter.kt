@@ -31,8 +31,8 @@ class ReactionRouter(
 
     private val mainMenuHandler: MainMenuHandler = MainMenuHandler(
         bot, attendanceService, reportService,
-        onOpenCandidateSelection = { chatId, eventId -> candidateHandler.showCandidateSelection(chatId, eventId) },
-        onStartSession = { chatId, eventId, senderId -> sessionManager.startSession(chatId, eventId, senderId) },
+        onOpenCandidateSelection = { chatId -> candidateHandler.showCandidateSelection(chatId) },
+        onStartSession = { chatId, senderId -> sessionManager.startSession(chatId, senderId) },
         onResetAttendance = { chatId ->
             attendanceService.resetTodayAttendance(chatId, DateUtils.today())
             sessionManager.resetSession(chatId)

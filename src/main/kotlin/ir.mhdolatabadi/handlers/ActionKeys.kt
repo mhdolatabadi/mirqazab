@@ -5,6 +5,7 @@ package ir.mhdolatabadi.handlers
 // handler that can appear on the same logical message.
 
 internal const val KEY_RANDOM_MIRGHAZAB = "🎲"
+internal const val KEY_CANDIDATE_ROLL = "🎯"
 internal const val KEY_DAILY_REPORT = "📋"
 internal const val KEY_WEEKLY_REPORT = "📅"
 internal const val KEY_OVERALL_REPORT = "📈"

@@ -3,6 +3,8 @@ package ir.mhdolatabadi
 import ir.mhdolatabadi.config.BotConfig
 import ir.mhdolatabadi.matrix.MatrixClient
 import jakarta.persistence.Persistence
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 
 private val log = LoggerFactory.getLogger("ir.mhdolatabadi.Main")
@@ -30,4 +32,8 @@ fun main() {
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("Shutting down...")
     })
+
+    // start() only launches background coroutines on daemon threads - without
+    // something blocking here, the JVM would exit immediately after this point.
+    runBlocking { awaitCancellation() }
 }

@@ -6,7 +6,14 @@ import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.ReactionKeys
 import kotlin.random.Random
 
-/** The "میرغضب تصادفی" candidate-picking flow: pick who's eligible, then roll one at random. */
+/**
+ * The "میرغضب تصادفی" candidate-picking flow: pick who's eligible, then roll one at random.
+ *
+ * Runs on its own message rather than editing the caller's message in place. Matrix
+ * reactions are keyed by (user, key, event) - a second click of a key the user already
+ * reacted with just un-reacts it instead of firing again, so a key used to *open* this
+ * flow (🎲 on the main menu) can't also be reused to *act* within it on the same event.
+ */
 class CandidateSelectionHandler(
     private val bot: MatrixLongPollingBot,
     private val memberService: MemberService,
@@ -17,21 +24,22 @@ class CandidateSelectionHandler(
     fun isCandidateMessage(chatId: String, eventId: String): Boolean =
         candidateSelections.containsKey(key(chatId, eventId))
 
-    fun showCandidateSelection(chatId: String, eventId: String) {
+    fun showCandidateSelection(chatId: String) {
         val members = memberService.getGroupMembers(chatId)
         if (members.isEmpty()) {
-            bot.editMessage(chatId, eventId, "⚠️ هنوز عضوی شناسایی نشده است.")
+            bot.sendMessage(chatId, "⚠️ هنوز عضوی شناسایی نشده است.")
             return
         }
+        val eventId = bot.sendMessage(chatId, "در حال آماده‌سازی...")
         candidateSelections[key(chatId, eventId)] = members.keys.toMutableSet()
         bot.editMessage(chatId, eventId, buildCandidateText(chatId, eventId))
-        val keys = members.keys.indices.map { ReactionKeys.forIndex(it + 1) } + listOf(KEY_RANDOM_MIRGHAZAB, KEY_CANCEL)
+        val keys = members.keys.indices.map { ReactionKeys.forIndex(it + 1) } + listOf(KEY_CANDIDATE_ROLL, KEY_CANCEL)
         bot.reactAll(chatId, eventId, keys)
     }
 
     fun handleReaction(chatId: String, eventId: String, key: String) {
         when (key) {
-            KEY_RANDOM_MIRGHAZAB -> performRandomFromCandidates(chatId, eventId)
+            KEY_CANDIDATE_ROLL -> performRandomFromCandidates(chatId, eventId)
             KEY_CANCEL -> cancelSelection(chatId, eventId)
             else -> {
                 val orderedUserIds = memberService.getGroupMembers(chatId).keys.toList()
@@ -58,7 +66,7 @@ class CandidateSelectionHandler(
                 appendLine("${ReactionKeys.forIndex(index + 1)} $mark $name ($countPersian بار)")
             }
             appendLine()
-            appendLine("$KEY_RANDOM_MIRGHAZAB شانسی انتخاب کن   $KEY_CANCEL انصراف")
+            appendLine("$KEY_CANDIDATE_ROLL شانسی انتخاب کن   $KEY_CANCEL انصراف")
         }
     }
 

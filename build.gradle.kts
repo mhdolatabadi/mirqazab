@@ -63,7 +63,12 @@ jib {
         image = "docker.arvancloud.ir/eclipse-temurin:17-jre"
         platforms {
             platform {
-                architecture = "amd64"
+                // Build for whatever machine runs `jibDockerBuild`, so the image
+                // is always native to the Docker daemon that will run it.
+                architecture = when (System.getProperty("os.arch")) {
+                    "aarch64", "arm64" -> "arm64"
+                    else -> "amd64"
+                }
                 os = "linux"
             }
         }
