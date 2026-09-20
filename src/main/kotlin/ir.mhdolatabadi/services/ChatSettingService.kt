@@ -7,7 +7,7 @@ class SettingService(private val emf: EntityManagerFactory) {
     fun isDailyQuestionEnabled(chatId: String): Boolean {
         val entityManager = emf.createEntityManager()
         entityManager.use { em ->
-            val setting = em.find(ChatSetting::class.java, chatId.toLong())
+            val setting = em.find(ChatSetting::class.java, chatId)
             return setting?.dailyQuestionEnabled ?: true
         }
     }
@@ -16,9 +16,9 @@ class SettingService(private val emf: EntityManagerFactory) {
         val em = emf.createEntityManager()
         try {
             em.transaction.begin()
-            val setting = em.find(ChatSetting::class.java, chatId.toLong())
+            val setting = em.find(ChatSetting::class.java, chatId)
             if (setting == null) {
-                val newSetting = ChatSetting(chatId = chatId.toLong(), dailyQuestionEnabled = enabled)
+                val newSetting = ChatSetting(chatId = chatId, dailyQuestionEnabled = enabled)
                 em.persist(newSetting)
             } else {
                 setting.dailyQuestionEnabled = enabled

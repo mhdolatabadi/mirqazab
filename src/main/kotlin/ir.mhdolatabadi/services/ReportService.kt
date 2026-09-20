@@ -19,7 +19,7 @@ class ReportService(
         }
 
         val members = memberService.getGroupMembers(chatId)
-        val userStats = mutableMapOf<Long, MutableMap<ActivityStatus, Int>>()
+        val userStats = mutableMapOf<String, MutableMap<ActivityStatus, Int>>()
 
         for (rec in records) {
             val stats = userStats.getOrPut(rec.userId) { mutableMapOf() }
@@ -43,6 +43,7 @@ class ReportService(
         val totalVacationUsers = sortedUsers.count { it.vacationCount > 0 }
 
         return buildString {
+            appendLine("#اعلام_وضعیت: توسعه/واکنش سریع")
             appendLine("📊 *گزارش وضعیت توسعه/واکنش سریع/مرخصی*")
             appendLine("")
             appendLine("*🔹 به‌ازای هر کاربر:*")
@@ -114,7 +115,6 @@ class ReportService(
         }
     }
 
-    // ==================== گزارش هفتگی ====================
     fun generateWeeklyReport(chatId: String, startDate: java.time.LocalDate, endDate: java.time.LocalDate): String {
         val records = attendanceService.getAttendanceReport(chatId, startDate, endDate)
         if (records.isEmpty()) {
@@ -122,7 +122,7 @@ class ReportService(
         }
 
         val members = memberService.getGroupMembers(chatId)
-        val userStats = mutableMapOf<Long, MutableMap<AttendanceStatus, Int>>()
+        val userStats = mutableMapOf<String, MutableMap<AttendanceStatus, Int>>()
         for (rec in records) {
             val stats = userStats.getOrPut(rec.userId) { mutableMapOf() }
             stats[rec.status] = stats.getOrDefault(rec.status, 0) + 1

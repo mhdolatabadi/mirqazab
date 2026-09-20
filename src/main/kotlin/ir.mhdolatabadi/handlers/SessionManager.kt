@@ -1,5 +1,6 @@
 package ir.mhdolatabadi.handlers
 
+import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.models.UserInfo
 import ir.mhdolatabadi.models.StatusSession
 import ir.mhdolatabadi.enums.AttendanceStatus
@@ -7,13 +8,13 @@ import ir.mhdolatabadi.services.MemberService
 import ir.mhdolatabadi.services.AttendanceService
 import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
-import org.telegram.telegrambots.bots.TelegramLongPollingBot
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
+import ir.mhdolatabadi.utils.ReactionKeys
+
+private const val DONE_PRESENT_KEY = "➡️"
+private const val DONE_FINAL_KEY = "✔️"
 
 class SessionManager(
-    private val bot: TelegramLongPollingBot,
+    private val bot: MatrixLongPollingBot,
     private val memberService: MemberService,
     private val attendanceService: AttendanceService
 ) {
@@ -21,73 +22,61 @@ class SessionManager(
 
     fun getActiveSession(chatId: String): StatusSession? = activeSessions[chatId]
 
-    fun startSession(chatId: String, messageId: Int, initiatorUserId: Long): StatusSession? {
+    fun startSession(chatId: String, rootEventId: String, initiatorUserId: String): StatusSession? {
         if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) {
-            val edit = EditMessageText().apply {
-                this.chatId = chatId
-                this.messageId = messageId
-                this.text = "⚠️ گزارش جلسه امروز قبلاً ثبت شده است.\nبرای ثبت مجدد ابتدا از دکمه «حذف گزارش جلسه روزانه امروز» استفاده کنید."
-                this.replyMarkup = null
-            }
-            bot.execute(edit)
+            bot.editMessage(
+                chatId, rootEventId,
+                "⚠️ گزارش جلسه امروز قبلاً ثبت شده است.\nبرای ثبت مجدد ابتدا از دکمه «حذف گزارش جلسه روزانه امروز» استفاده کنید."
+            )
             return null
         }
 
         if (activeSessions.containsKey(chatId)) {
-            val edit = EditMessageText().apply {
-                this.chatId = chatId
-                this.messageId = messageId
-                this.text = "⚠️ در حال حاضر یک جلسه گزارش در این گروه در حال اجراست.\nلطفاً ابتدا آن را تکمیل کنید."
-                this.replyMarkup = null
-            }
-            bot.execute(edit)
+            bot.editMessage(
+                chatId, rootEventId,
+                "⚠️ در حال حاضر یک جلسه گزارش در این گروه در حال اجراست.\nلطفاً ابتدا آن را تکمیل کنید."
+            )
             return null
         }
 
         val members = memberService.getGroupMembers(chatId)
         if (members.isEmpty()) {
-            val edit = EditMessageText().apply {
-                this.chatId = chatId
-                this.messageId = messageId
-                this.text = "هنوز هیچ عضوی شناسایی نشده است. لطفاً اعضا یک پیام بفرستند."
-                this.replyMarkup = null
-            }
-            bot.execute(edit)
+            bot.editMessage(chatId, rootEventId, "هنوز هیچ عضوی شناسایی نشده است. لطفاً اعضا یک پیام بفرستند.")
             return null
         }
 
+        val orderedUserIds = members.keys.toList()
         val sessionUsers = members.mapValues { UserInfo(it.key, it.value) }.toMutableMap()
-        val keyboard = buildStatusKeyboard(sessionUsers, "present")
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = messageId
-            this.text = "کیا تو جلسه حضور داشتن؟"
-            this.replyMarkup = keyboard
-            this.parseMode = "Markdown"
-        }
-        bot.execute(edit)
-
-        val session = StatusSession(messageId, sessionUsers, "present", initiatorUserId)
+        val session = StatusSession(rootEventId, sessionUsers, orderedUserIds, "present", initiatorUserId)
         activeSessions[chatId] = session
+
+        val text = buildStatusText(session, "کیا تو جلسه حضور داشتن؟")
+        bot.editMessage(chatId, rootEventId, text)
+        val keys = orderedUserIds.indices.map { ReactionKeys.forIndex(it + 1) } + DONE_PRESENT_KEY
+        bot.reactAll(chatId, rootEventId, keys)
+
         return session
     }
 
-    fun toggleUserStatus(chatId: String, userId: Long) {
+    fun toggleUserStatus(chatId: String, userId: String) {
         val session = activeSessions[chatId] ?: return
         val user = session.users[userId] ?: return
 
         if (session.state == "present") {
             user.status = if (user.status == AttendanceStatus.PRESENT) AttendanceStatus.UNKNOWN else AttendanceStatus.PRESENT
         } else {
+            if (user.status == AttendanceStatus.PRESENT) return // not part of this stage anymore
             user.status = if (user.status == AttendanceStatus.ABSENT_EXCUSED) AttendanceStatus.UNKNOWN else AttendanceStatus.ABSENT_EXCUSED
         }
-        updateSessionMessage(chatId, if (session.state == "present") "کیا تو جلسه حاضر بودن؟" else "کیا خبر داده بودن؟")
+        val prompt = if (session.state == "present") "کیا تو جلسه حاضر بودن؟" else "کیا خبر داده بودن؟"
+        bot.editMessage(chatId, session.rootEventId, buildStatusText(session, prompt))
     }
 
     fun advanceSession(chatId: String) {
         val session = activeSessions[chatId] ?: return
         session.state = "absent_excused"
-        updateSessionMessage(chatId, "کیا خبر داده بودن؟")
+        bot.editMessage(chatId, session.rootEventId, buildStatusText(session, "کیا خبر داده بودن؟"))
+        bot.react(chatId, session.rootEventId, DONE_FINAL_KEY)
     }
 
     fun finishSession(chatId: String): StatusSession? {
@@ -121,15 +110,7 @@ class SessionManager(
             appendLine("\nوضعیت: $presentPersian/$totalPersian")
         }
 
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = session.messageId
-            this.text = report
-            this.replyMarkup = null
-            this.parseMode = "Markdown"
-        }
-        bot.execute(edit)
-
+        bot.editMessage(chatId, session.rootEventId, report)
         return session
     }
 
@@ -137,46 +118,25 @@ class SessionManager(
         activeSessions.remove(chatId)
     }
 
-    private fun updateSessionMessage(chatId: String, text: String) {
-        val session = activeSessions[chatId] ?: return
-        val keyboard = buildStatusKeyboard(session.users, session.state)
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = session.messageId
-            this.text = text
-            this.replyMarkup = keyboard
-            this.parseMode = "Markdown"
-        }
-        bot.execute(edit)
-    }
-
-    private fun buildStatusKeyboard(users: Map<Long, UserInfo>, state: String): InlineKeyboardMarkup {
-        val rows = mutableListOf<List<InlineKeyboardButton>>()
-        var currentRow = mutableListOf<InlineKeyboardButton>()
-        for ((userId, userInfo) in users) {
-            if (state == "absent_excused" && userInfo.status == AttendanceStatus.PRESENT) continue
-            val buttonText = when (userInfo.status) {
-                AttendanceStatus.PRESENT -> "✅ ${userInfo.name}"
-                AttendanceStatus.ABSENT_EXCUSED -> "\uD83D\uDD14 ${userInfo.name}"
-                else -> userInfo.name
+    private fun buildStatusText(session: StatusSession, prompt: String): String = buildString {
+        appendLine(prompt)
+        appendLine()
+        for ((index, userId) in session.orderedUserIds.withIndex()) {
+            val userInfo = session.users[userId] ?: continue
+            if (session.state == "absent_excused" && userInfo.status == AttendanceStatus.PRESENT) continue
+            val key = ReactionKeys.forIndex(index + 1)
+            val statusMark = when (userInfo.status) {
+                AttendanceStatus.PRESENT -> "✅ "
+                AttendanceStatus.ABSENT_EXCUSED -> "🔔 "
+                else -> ""
             }
-            val button = InlineKeyboardButton().apply {
-                this.text = buttonText
-                callbackData = "user_$userId"
-            }
-            currentRow.add(button)
-            if (currentRow.size == 2) {
-                rows.add(currentRow)
-                currentRow = mutableListOf()
-            }
+            appendLine("$key $statusMark${userInfo.name}")
         }
-        if (currentRow.isNotEmpty()) rows.add(currentRow)
-        val doneText = if (state == "present") "➡️ همینا بودن" else "✔️ بفرست بره"
-        val doneButton = InlineKeyboardButton().apply {
-            text = doneText
-            callbackData = if (state == "present") "done_present" else "done_final"
+        appendLine()
+        if (session.state == "present") {
+            appendLine("$DONE_PRESENT_KEY = همینا بودن، برو مرحله بعد")
+        } else {
+            appendLine("$DONE_FINAL_KEY = بفرست بره")
         }
-        rows.add(listOf(doneButton))
-        return InlineKeyboardMarkup(rows)
     }
 }

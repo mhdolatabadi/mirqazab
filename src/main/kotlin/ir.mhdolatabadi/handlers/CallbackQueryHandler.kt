@@ -1,258 +1,157 @@
 package ir.mhdolatabadi.handlers
 
 import ir.mhdolatabadi.enums.ActivityStatus
+import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.services.*
 import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
-import org.telegram.telegrambots.bots.TelegramLongPollingBot
-import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText
-import org.telegram.telegrambots.meta.api.objects.Update
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
+import ir.mhdolatabadi.utils.ReactionKeys
+import java.time.LocalDate
 import kotlin.random.Random
 
+private const val KEY_RANDOM_MIRGHAZAB = "🎲"
+private const val KEY_DAILY_REPORT = "📋"
+private const val KEY_WEEKLY_REPORT = "📅"
+private const val KEY_OVERALL_REPORT = "📈"
+private const val KEY_RESET_ATTENDANCE = "🔄"
+private const val KEY_CONFIRM = "✅"
+private const val KEY_CANCEL = "❌"
+
+private const val KEY_ACTIVITY_DEVELOPMENT = "🛠️"
+private const val KEY_ACTIVITY_QUICK_REACTION = "⚡"
+private const val KEY_ACTIVITY_VACATION = "🏖️"
+
+/**
+ * Matrix has no inline-keyboard/callback-query concept, so every action that used
+ * to be a button is now a reaction key on a message. Which "flow" a reaction belongs
+ * to is decided by which tracked map contains the message's root event id - not by
+ * a self-describing callback data string like Telegram had.
+ */
 class CallbackQueryHandler(
-    private val bot: TelegramLongPollingBot,
+    private val bot: MatrixLongPollingBot,
     private val sessionManager: SessionManager,
     private val activityService: ActivityService,
     private val reportService: ReportService,
     private val memberService: MemberService,
     private val attendanceService: AttendanceService
 ) {
-    private val resetConfirmations = mutableMapOf<String, Long>()
-    private val candidateSelections = mutableMapOf<String, MutableSet<Long>>()
+    private val resetConfirmations = mutableMapOf<String, Pair<String, String>>() // chatId -> (initiatorUserId, eventId)
+    private val candidateSelections = mutableMapOf<String, MutableSet<String>>() // "chatId-eventId" -> candidate userIds
+    private val activityMessageDates = mutableMapOf<String, LocalDate>() // eventId -> date
 
-    fun buildActivityMessage(chatId: String): Pair<String, InlineKeyboardMarkup> {
-        val today = DateUtils.today()
-        val persianDate = DateUtils.toPersianDate(today)
+    // ==================== منوی اصلی ====================
+    fun buildMainMenuText(chatId: String): String {
+        val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
+        val reportLine = if (hasAttendanceToday) {
+            "$KEY_DAILY_REPORT گزارش امروز ثبت شده (برای ریست کلیک کنید)"
+        } else {
+            "$KEY_DAILY_REPORT ثبت گزارش جلسه روزانه امروز"
+        }
+        return buildString {
+            appendLine("لطفاً انتخاب کنید:")
+            appendLine()
+            appendLine("$KEY_RANDOM_MIRGHAZAB میرغضب تصادفی")
+            appendLine(reportLine)
+            appendLine("$KEY_WEEKLY_REPORT مشاهده گزارش هفتگی (۷ روز گذشته)")
+            appendLine("$KEY_OVERALL_REPORT مشاهده وضعیت توسعه/واکنش سریع/مرخصی")
+            appendLine("$KEY_RESET_ATTENDANCE حذف گزارش جلسه روزانه امروز")
+        }
+    }
+
+    fun mainMenuKeys(): List<String> =
+        listOf(KEY_RANDOM_MIRGHAZAB, KEY_DAILY_REPORT, KEY_WEEKLY_REPORT, KEY_OVERALL_REPORT, KEY_RESET_ATTENDANCE)
+
+    private fun showMainMenuOnExistingMessage(chatId: String, eventId: String) {
+        bot.editMessage(chatId, eventId, buildMainMenuText(chatId))
+        bot.reactAll(chatId, eventId, mainMenuKeys())
+    }
+
+    // ==================== سوال روزانه توسعه/واکنش سریع ====================
+    fun buildActivityMessage(chatId: String, date: LocalDate = DateUtils.today()): Pair<String, List<String>> {
+        val persianDate = DateUtils.toPersianDate(date)
         val dateStr = "${NumberUtils.toPersianNumber(persianDate.year)}/${NumberUtils.toPersianNumber(persianDate.month)}/${NumberUtils.toPersianNumber(persianDate.day)}"
 
-        val todayActivities = activityService.getTodayActivities(chatId)
+        val todayActivities = activityService.getActivitiesOn(chatId, date)
         val members = memberService.getGroupMembers(chatId)
 
         val messageText = buildString {
-            appendLine("📋 *ثبت وضعیت روزانه*")
+            appendLine("📋 ثبت وضعیت توسعه/واکنش سریع")
             appendLine("تاریخ: $dateStr")
-            appendLine("")
+            appendLine()
             appendLine("امروز توسعه بودی یا واکنش سریع؟")
-            appendLine("")
+            appendLine()
+            appendLine("$KEY_ACTIVITY_DEVELOPMENT توسعه   $KEY_ACTIVITY_QUICK_REACTION واکنش سریع   $KEY_ACTIVITY_VACATION مرخصی")
+            appendLine()
             if (todayActivities.isEmpty()) {
                 appendLine("📭 هنوز کسی پاسخی نداده است.")
             } else {
-                appendLine("*📊 لیست پاسخ‌ها:*")
+                appendLine("📊 لیست پاسخ‌ها:")
                 for ((userId, status) in todayActivities) {
                     val name = members[userId] ?: "کاربر $userId"
                     val (emoji, statusName) = when (status) {
-                        ActivityStatus.DEVELOPMENT -> "🛠️" to "توسعه"
-                        ActivityStatus.QUICK_REACTION -> "⚡" to "واکنش سریع"
-                        ActivityStatus.VACATION -> "🏖️" to "مرخصی"
+                        ActivityStatus.DEVELOPMENT -> KEY_ACTIVITY_DEVELOPMENT to "توسعه"
+                        ActivityStatus.QUICK_REACTION -> KEY_ACTIVITY_QUICK_REACTION to "واکنش سریع"
+                        ActivityStatus.VACATION -> KEY_ACTIVITY_VACATION to "مرخصی"
                     }
                     appendLine("• $name: $emoji $statusName")
                 }
             }
         }
 
-        val devBtn = InlineKeyboardButton().apply {
-            text = "🛠️ توسعه"
-            callbackData = "activity_development"
-        }
-        val reactBtn = InlineKeyboardButton().apply {
-            text = "⚡ واکنش سریع"
-            callbackData = "activity_quick_reaction"
-        }
-        val vacationBtn = InlineKeyboardButton().apply {
-            text = "🏖️ مرخصی"
-            callbackData = "activity_vacation"
-        }
-        val keyboard = InlineKeyboardMarkup(listOf(listOf(devBtn, reactBtn, vacationBtn)))
-
-        return Pair(messageText, keyboard)
+        val keys = listOf(KEY_ACTIVITY_DEVELOPMENT, KEY_ACTIVITY_QUICK_REACTION, KEY_ACTIVITY_VACATION)
+        return Pair(messageText, keys)
     }
 
-    fun handleCallbackQuery(update: Update) {
-        val callback = update.callbackQuery
-        val chatId = callback.message.chatId.toString()
-        val data = callback.data
-        val currentMsgId = callback.message.messageId
-        val userId = callback.from.id
+    fun sendActivityMessage(chatId: String, date: LocalDate = DateUtils.today()): String {
+        val (text, keys) = buildActivityMessage(chatId, date)
+        val eventId = bot.sendMessage(chatId, text)
+        activityMessageDates[eventId] = date
+        bot.reactAll(chatId, eventId, keys)
+        return eventId
+    }
+
+    // ==================== نقطه ورود واکنش‌ها ====================
+    fun handleReaction(chatId: String, senderId: String, eventId: String, key: String) {
+        val candidateKey = "$chatId-$eventId"
+        val activeSession = sessionManager.getActiveSession(chatId)
 
         when {
-            data == "activity_development" || data == "activity_quick_reaction" || data == "activity_vacation" -> {
-                val newStatus = when (data) {
-                    "activity_development" -> ActivityStatus.DEVELOPMENT
-                    "activity_quick_reaction" -> ActivityStatus.QUICK_REACTION
-                    else -> ActivityStatus.VACATION
-                }
+            candidateSelections.containsKey(candidateKey) -> handleCandidateReaction(chatId, eventId, key)
 
-                val currentStatus = activityService.getUserTodayStatus(chatId, userId)
+            activityMessageDates.containsKey(eventId) -> handleActivityReaction(chatId, senderId, eventId, key)
 
-                when (currentStatus) {
-                    null -> {
-                        activityService.saveDailyActivity(chatId, userId, newStatus)
-                    }
-                    newStatus -> {
-                        activityService.deleteUserTodayActivity(chatId, userId)
-                    }
+            activeSession != null && activeSession.rootEventId == eventId -> {
+                if (senderId != activeSession.initiatorUserId) return
+                when (key) {
+                    "➡️" -> sessionManager.advanceSession(chatId)
+                    "✔️" -> sessionManager.finishSession(chatId)
                     else -> {
-                        activityService.deleteUserTodayActivity(chatId, userId)
-                        activityService.saveDailyActivity(chatId, userId, newStatus)
+                        val targetUserId = activeSession.orderedUserIds.withIndex()
+                            .firstOrNull { (i, _) -> ReactionKeys.forIndex(i + 1) == key }?.value
+                        if (targetUserId != null) sessionManager.toggleUserStatus(chatId, targetUserId)
                     }
                 }
-
-                val (text, keyboard) = buildActivityMessage(chatId)
-
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = text
-                    this.replyMarkup = keyboard
-                    this.parseMode = "Markdown"
-                }
-                bot.execute(edit)
-
-                val answer = AnswerCallbackQuery().apply {
-                    this.callbackQueryId = callback.id
-                    this.text = when (currentStatus) {
-                        null -> "✅ وضعیت شما ثبت شد."
-                        newStatus -> "❌ وضعیت شما لغو شد."
-                        else -> "✅ وضعیت شما تغییر کرد."
-                    }
-                    this.showAlert = false
-                }
-                bot.execute(answer)
             }
 
-            // ==================== ادامه کدهای قبلی ====================
-            data == "reset_today_attendance" -> {
-                resetConfirmations[chatId] = userId
-                val confirmBtn = InlineKeyboardButton().apply {
-                    text = "✅ بله، ریست کن"
-                    callbackData = "confirm_reset"
-                }
-                val cancelBtn = InlineKeyboardButton().apply {
-                    text = "❌ انصراف"
-                    callbackData = "cancel_reset"
-                }
-                val keyboard = InlineKeyboardMarkup(listOf(listOf(confirmBtn, cancelBtn)))
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = "⚠️ *هشدار!*\n\nآیا مطمئن هستید که می‌خواهید تمام رکوردهای حضور/غیاب امروز را ریست کنید؟\n\nاین عمل غیرقابل بازگشت است."
-                    this.replyMarkup = keyboard
-                    this.parseMode = "Markdown"
-                }
-                bot.execute(edit)
+            resetConfirmations.containsKey(chatId) -> handleResetConfirmReaction(chatId, senderId, key)
+
+            else -> handleMenuReaction(chatId, senderId, eventId, key)
+        }
+    }
+
+    private fun handleMenuReaction(chatId: String, senderId: String, eventId: String, key: String) {
+        when (key) {
+            KEY_RANDOM_MIRGHAZAB -> showCandidateSelection(chatId, eventId)
+
+            KEY_DAILY_REPORT -> {
+                if (attendanceService.hasAttendanceToday(chatId, DateUtils.today())) return
+                if (sessionManager.getActiveSession(chatId) != null) return
+                bot.editMessage(chatId, eventId, "🔄 شروع فرایند گزارش جلسه...")
+                sessionManager.startSession(chatId, eventId, senderId)
             }
 
-            data == "confirm_reset" -> {
-                val initiatorId = resetConfirmations[chatId]
-                if (initiatorId != userId) {
-                    val answer = AnswerCallbackQuery().apply {
-                        this.callbackQueryId = callback.id
-                        this.text = "⚠️ فقط شخصی که درخواست ریست را داده می‌تواند تأیید کند."
-                        this.showAlert = true
-                    }
-                    bot.execute(answer)
-                    return
-                }
-                attendanceService.resetTodayAttendance(chatId, DateUtils.today())
-                sessionManager.resetSession(chatId)
-                resetConfirmations.remove(chatId)
-                showMainMenuOnExistingMessage(chatId, currentMsgId)
-            }
-
-            data == "cancel_reset" -> {
-                resetConfirmations.remove(chatId)
-                showMainMenuOnExistingMessage(chatId, currentMsgId)
-            }
-
-            data == "overall_activity_report" -> {
-                val loadingMsg = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = "📊 در حال تولید گزارش وضعیت توسعه/واکنش سریع/مرخصی... لطفاً چند لحظه صبر کنید."
-                    this.replyMarkup = null
-                }
-                bot.execute(loadingMsg)
-                val report = reportService.generateOverallActivityReport(chatId)
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = report
-                    this.parseMode = "Markdown"
-                    this.replyMarkup = null
-                }
-                bot.execute(edit)
-            }
-
-            data == "reset_and_resend_question" -> {
-                activityService.deleteAllTodayActivities(chatId)
-
-                val answer = AnswerCallbackQuery().apply {
-                    this.callbackQueryId = callback.id
-                    this.text = "✅ پاسخ‌ها پاک شدند. سوال جدید ارسال می‌شود..."
-                    this.showAlert = false
-                }
-                bot.execute(answer)
-
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = "🔄 پاسخ‌ها پاک شدند. در حال ارسال سوال جدید..."
-                    this.replyMarkup = null
-                }
-                bot.execute(edit)
-
-                val (text, keyboard) = buildActivityMessage(chatId)
-                val msg = org.telegram.telegrambots.meta.api.methods.send.SendMessage(chatId, text)
-                msg.replyMarkup = keyboard
-                msg.parseMode = "Markdown"
-                bot.execute(msg)
-            }
-
-            data == "random_mirghazab_menu" -> showCandidateSelection(chatId, currentMsgId)
-            data == "daily_report" -> {
-                val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
-                if (hasAttendanceToday) {
-                    val answer = AnswerCallbackQuery().apply {
-                        this.callbackQueryId = callback.id
-                        this.text = "⚠️ گزارش جلسه امروز قبلاً ثبت شده است.\nبرای ثبت مجدد ابتدا از دکمه «حذف گزارش جلسه روزانه امروز» استفاده کنید."
-                        this.showAlert = true
-                    }
-                    bot.execute(answer)
-                    return
-                }
-
-                val activeSession = sessionManager.getActiveSession(chatId)
-                if (activeSession != null) {
-                    val answer = AnswerCallbackQuery().apply {
-                        this.callbackQueryId = callback.id
-                        this.text = "⚠️ در حال حاضر یک جلسه گزارش در این گروه در حال اجراست.\nلطفاً ابتدا آن را تکمیل کنید."
-                        this.showAlert = true
-                    }
-                    bot.execute(answer)
-                    return
-                }
-
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = "🔄 شروع فرایند گزارش جلسه..."
-                    this.replyMarkup = null
-                }
-                bot.execute(edit)
-                sessionManager.startSession(chatId, currentMsgId, userId)
-            }
-            data == "weekly_report_now" -> {
-                val loadingMsg = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = "📊 در حال تولید گزارش هفتگی... لطفاً چند لحظه صبر کنید."
-                    this.replyMarkup = null
-                }
-                bot.execute(loadingMsg)
+            KEY_WEEKLY_REPORT -> {
+                bot.editMessage(chatId, eventId, "📊 در حال تولید گزارش هفتگی... لطفاً چند لحظه صبر کنید.")
                 val endDate = DateUtils.today()
                 val startDate = endDate.minusWeeks(1)
                 val report = reportService.generateWeeklyReport(chatId, startDate, endDate)
@@ -265,131 +164,128 @@ class CallbackQueryHandler(
                 val month2 = NumberUtils.toPersianNumber(endPersian.month)
                 val day2 = NumberUtils.toPersianNumber(endPersian.day)
                 val title = "📊 گزارش هفتگی حضور و غیاب\n(از $year1/$month1/$day1 تا $year2/$month2/$day2)"
-                val fullMessage = "$title\n\n$report"
-                val edit = EditMessageText().apply {
-                    this.chatId = chatId
-                    this.messageId = currentMsgId
-                    this.text = fullMessage
-                    this.parseMode = "Markdown"
-                    this.replyMarkup = null
-                }
-                bot.execute(edit)
+                bot.editMessage(chatId, eventId, "$title\n\n$report")
             }
-            data.startsWith("toggle_cand_") -> {
-                val uid = data.removePrefix("toggle_cand_").toLong()
-                toggleCandidate(chatId, currentMsgId, uid)
+
+            KEY_OVERALL_REPORT -> {
+                bot.editMessage(chatId, eventId, "📊 در حال تولید گزارش وضعیت توسعه/واکنش سریع/مرخصی... لطفاً چند لحظه صبر کنید.")
+                val report = reportService.generateOverallActivityReport(chatId)
+                bot.editMessage(chatId, eventId, report)
             }
-            data == "do_random_from_candidates" -> performRandomFromCandidates(chatId, currentMsgId)
-            data == "cancel_candidate_selection" -> cancelSelection(chatId, currentMsgId)
-            else -> {
-                val session = sessionManager.getActiveSession(chatId)
-                if (session == null || session.messageId != currentMsgId) return
 
-                if (userId != session.initiatorUserId) {
-                    val answer = AnswerCallbackQuery().apply {
-                        this.callbackQueryId = callback.id
-                        this.text = "⚠️ فقط شخصی که جلسه را شروع کرده می‌تواند روی دکمه‌ها کلیک کند."
-                        this.showAlert = false
-                    }
-                    bot.execute(answer)
-                    return
-                }
-
-                when {
-                    data.startsWith("user_") -> {
-                        val uid = data.removePrefix("user_").toLong()
-                        sessionManager.toggleUserStatus(chatId, uid)
-                    }
-                    data == "done_present" -> {
-                        sessionManager.advanceSession(chatId)
-                    }
-                    data == "done_final" -> {
-                        sessionManager.finishSession(chatId)
-                    }
-                }
+            KEY_RESET_ATTENDANCE -> {
+                resetConfirmations[chatId] = senderId to eventId
+                bot.editMessage(
+                    chatId, eventId,
+                    "⚠️ هشدار!\n\nآیا مطمئن هستید که می‌خواهید تمام رکوردهای حضور/غیاب امروز را ریست کنید؟\nاین عمل غیرقابل بازگشت است.\n\n$KEY_CONFIRM بله، ریست کن   $KEY_CANCEL انصراف"
+                )
+                bot.reactAll(chatId, eventId, listOf(KEY_CONFIRM, KEY_CANCEL))
             }
         }
     }
 
-    // ==================== توابع کمکی (بدون تغییر) ====================
-    private fun showCandidateSelection(chatId: String, messageId: Int) {
+    private fun handleResetConfirmReaction(chatId: String, senderId: String, key: String) {
+        val (initiatorId, eventId) = resetConfirmations[chatId] ?: return
+        when (key) {
+            KEY_CONFIRM -> {
+                if (initiatorId != senderId) return
+                attendanceService.resetTodayAttendance(chatId, DateUtils.today())
+                sessionManager.resetSession(chatId)
+                resetConfirmations.remove(chatId)
+                showMainMenuOnExistingMessage(chatId, eventId)
+            }
+            KEY_CANCEL -> {
+                resetConfirmations.remove(chatId)
+                showMainMenuOnExistingMessage(chatId, eventId)
+            }
+        }
+    }
+
+    private fun handleActivityReaction(chatId: String, senderId: String, eventId: String, key: String) {
+        val newStatus = when (key) {
+            KEY_ACTIVITY_DEVELOPMENT -> ActivityStatus.DEVELOPMENT
+            KEY_ACTIVITY_QUICK_REACTION -> ActivityStatus.QUICK_REACTION
+            KEY_ACTIVITY_VACATION -> ActivityStatus.VACATION
+            else -> return
+        }
+        val date = activityMessageDates[eventId] ?: DateUtils.today()
+        val currentStatus = activityService.getUserStatusOn(chatId, senderId, date)
+
+        when (currentStatus) {
+            null -> activityService.saveActivity(chatId, senderId, newStatus, date)
+            newStatus -> activityService.deleteUserActivityOn(chatId, senderId, date)
+            else -> {
+                activityService.deleteUserActivityOn(chatId, senderId, date)
+                activityService.saveActivity(chatId, senderId, newStatus, date)
+            }
+        }
+
+        val (text, _) = buildActivityMessage(chatId, date)
+        bot.editMessage(chatId, eventId, text)
+    }
+
+    // ==================== انتخاب کاندیدا (میرغضب رندوم) ====================
+    private fun showCandidateSelection(chatId: String, eventId: String) {
         val members = memberService.getGroupMembers(chatId)
         if (members.isEmpty()) {
-            val edit = EditMessageText().apply {
-                this.chatId = chatId
-                this.messageId = messageId
-                this.text = "⚠️ هنوز عضوی شناسایی نشده است."
-                this.replyMarkup = null
-            }
-            bot.execute(edit)
+            bot.editMessage(chatId, eventId, "⚠️ هنوز عضوی شناسایی نشده است.")
             return
         }
-        val key = "$chatId-$messageId"
+        val key = "$chatId-$eventId"
         candidateSelections[key] = members.keys.toMutableSet()
-        val keyboard = buildCandidateKeyboard(chatId, messageId)
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = messageId
-            this.text = "کیا می‌تونن میرغضب وایستن؟"
-            this.replyMarkup = keyboard
-        }
-        bot.execute(edit)
+        bot.editMessage(chatId, eventId, buildCandidateText(chatId, eventId))
+        val keys = members.keys.indices.map { ReactionKeys.forIndex(it + 1) } + listOf(KEY_RANDOM_MIRGHAZAB, KEY_CANCEL)
+        bot.reactAll(chatId, eventId, keys)
     }
 
-    private fun buildCandidateKeyboard(chatId: String, messageId: Int): InlineKeyboardMarkup {
+    private fun buildCandidateText(chatId: String, eventId: String): String {
         val members = memberService.getGroupMembers(chatId)
-        val key = "$chatId-$messageId"
+        val orderedUserIds = members.keys.toList()
+        val key = "$chatId-$eventId"
         val selectedSet = candidateSelections[key] ?: members.keys.toMutableSet()
         val counts = memberService.getMirGhazabCounts(chatId)
-        val rows = mutableListOf<List<InlineKeyboardButton>>()
-        for ((userId, name) in members) {
-            val isSelected = userId in selectedSet
-            val count = counts[userId] ?: 0
-            val countPersian = NumberUtils.toPersianNumber(count)
-            val buttonText = "${if (isSelected) "✅" else "❌"} $name ($countPersian بار)"
-            val button = InlineKeyboardButton().apply {
-                this.text = buttonText
-                callbackData = "toggle_cand_$userId"
+        return buildString {
+            appendLine("کیا می‌تونن میرغضب وایستن؟")
+            appendLine()
+            for ((index, userId) in orderedUserIds.withIndex()) {
+                val name = members[userId] ?: continue
+                val isSelected = userId in selectedSet
+                val count = counts[userId] ?: 0
+                val countPersian = NumberUtils.toPersianNumber(count)
+                val mark = if (isSelected) "✅" else "❌"
+                appendLine("${ReactionKeys.forIndex(index + 1)} $mark $name ($countPersian بار)")
             }
-            rows.add(listOf(button))
+            appendLine()
+            appendLine("$KEY_RANDOM_MIRGHAZAB شانسی انتخاب کن   $KEY_CANCEL انصراف")
         }
-        val randomBtn = InlineKeyboardButton().apply {
-            text = "🎲 شانسی انتخاب کن"
-            callbackData = "do_random_from_candidates"
-        }
-        val cancelBtn = InlineKeyboardButton().apply {
-            text = "❌ انصراف"
-            callbackData = "cancel_candidate_selection"
-        }
-        rows.add(listOf(randomBtn))
-        rows.add(listOf(cancelBtn))
-        return InlineKeyboardMarkup(rows)
     }
 
-    private fun toggleCandidate(chatId: String, messageId: Int, userId: Long) {
-        val key = "$chatId-$messageId"
+    private fun handleCandidateReaction(chatId: String, eventId: String, key: String) {
+        when (key) {
+            KEY_RANDOM_MIRGHAZAB -> performRandomFromCandidates(chatId, eventId)
+            KEY_CANCEL -> cancelSelection(chatId, eventId)
+            else -> {
+                val members = memberService.getGroupMembers(chatId)
+                val orderedUserIds = members.keys.toList()
+                val targetUserId = orderedUserIds.withIndex()
+                    .firstOrNull { (i, _) -> ReactionKeys.forIndex(i + 1) == key }?.value
+                if (targetUserId != null) toggleCandidate(chatId, eventId, targetUserId)
+            }
+        }
+    }
+
+    private fun toggleCandidate(chatId: String, eventId: String, userId: String) {
+        val key = "$chatId-$eventId"
         val currentSet = candidateSelections[key] ?: return
         if (userId in currentSet) currentSet.remove(userId) else currentSet.add(userId)
-        val newKeyboard = buildCandidateKeyboard(chatId, messageId)
-        val edit = EditMessageReplyMarkup().apply {
-            this.chatId = chatId
-            this.messageId = messageId
-            this.replyMarkup = newKeyboard
-        }
-        bot.execute(edit)
+        bot.editMessage(chatId, eventId, buildCandidateText(chatId, eventId))
     }
 
-    private fun performRandomFromCandidates(chatId: String, messageId: Int) {
-        val key = "$chatId-$messageId"
+    private fun performRandomFromCandidates(chatId: String, eventId: String) {
+        val key = "$chatId-$eventId"
         val candidates = candidateSelections[key]?.toList() ?: emptyList()
         if (candidates.isEmpty()) {
-            val edit = EditMessageText().apply {
-                this.chatId = chatId
-                this.messageId = messageId
-                this.text = "⚠️ هیچکس انتخاب نشده است.ً حداقل یک نفر را انتخاب کن"
-                this.replyMarkup = buildCandidateKeyboard(chatId, messageId)
-            }
-            bot.execute(edit)
+            bot.editMessage(chatId, eventId, "⚠️ هیچ کاندیدی انتخاب نشده است. لطفاً حداقل یک عضو را انتخاب کنید.\n\n" + buildCandidateText(chatId, eventId))
             return
         }
         val randomUserId = candidates.random(Random)
@@ -398,61 +294,12 @@ class CallbackQueryHandler(
         memberService.incrementMirGhazabCount(chatId, randomUserId)
         val newCount = memberService.getMirGhazabCounts(chatId)[randomUserId] ?: 0
         val newCountPersian = NumberUtils.toPersianNumber(newCount)
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = messageId
-            this.text = "🎭 میرغضب امروز: *$name*\n\nتا حالا $newCountPersian بار میرغضب شده است."
-            this.replyMarkup = null
-            this.parseMode = "Markdown"
-        }
-        bot.execute(edit)
+        bot.editMessage(chatId, eventId, "🎭 میرغضب امروز: $name\n\nتا حالا $newCountPersian بار میرغضب شده است.")
         candidateSelections.remove(key)
     }
 
-    private fun cancelSelection(chatId: String, messageId: Int) {
-        candidateSelections.remove("$chatId-$messageId")
-        showMainMenuOnExistingMessage(chatId, messageId)
-    }
-
-    private fun showMainMenuOnExistingMessage(chatId: String, messageId: Int) {
-        val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
-        val randomBtn = InlineKeyboardButton().apply {
-            text = "🎲 میرغضب تصادفی"
-            callbackData = "random_mirghazab_menu"
-        }
-        val reportBtn = InlineKeyboardButton().apply {
-            text = if (hasAttendanceToday) {
-                "✅ گزارش امروز ثبت شده (برای ریست کلیک کنید)"
-            } else {
-                "📋 ثبت گزارش جلسه روزانه امروز"
-            }
-            callbackData = "daily_report"
-        }
-        val weeklyBtn = InlineKeyboardButton().apply {
-            text = "📊 مشاهده گزارش هفتگی (۷ روز گذشته)"
-            callbackData = "weekly_report_now"
-        }
-        val overallBtn = InlineKeyboardButton().apply {
-            text = "📊 مشاهده وضعیت توسعه/واکنش سریع/مرخصی"
-            callbackData = "overall_activity_report"
-        }
-        val resetBtn = InlineKeyboardButton().apply {
-            text = "🔄 حذف گزارش جلسه روزانه امروز"
-            callbackData = "reset_today_attendance"
-        }
-        val keyboard = InlineKeyboardMarkup(listOf(
-            listOf(randomBtn),
-            listOf(reportBtn),
-            listOf(weeklyBtn),
-            listOf(overallBtn),
-            listOf(resetBtn)
-        ))
-        val edit = EditMessageText().apply {
-            this.chatId = chatId
-            this.messageId = messageId
-            this.text = "انتخاب کن:"
-            this.replyMarkup = keyboard
-        }
-        bot.execute(edit)
+    private fun cancelSelection(chatId: String, eventId: String) {
+        candidateSelections.remove("$chatId-$eventId")
+        showMainMenuOnExistingMessage(chatId, eventId)
     }
 }

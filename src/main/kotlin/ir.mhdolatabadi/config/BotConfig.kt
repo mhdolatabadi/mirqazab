@@ -21,19 +21,15 @@ object BotConfig {
         }
     }
 
-    val botToken: String
-        get() = System.getenv("BOT_TOKEN")
-            ?: properties.getProperty("bot.token")
-            ?: throw IllegalStateException("BOT_TOKEN not found in environment or properties")
+    val matrixHomeserverUrl: String
+        get() = System.getenv("MATRIX_HOMESERVER_URL")
+            ?: properties.getProperty("matrix.homeserver.url")
+            ?: throw IllegalStateException("MATRIX_HOMESERVER_URL not found in environment or properties")
 
-    val botUsername: String
-        get() = properties.getProperty("bot.username", "dailybot")
-
-    val baseUrl: String
-        get() = properties.getProperty("bot.base.url", "https://tapi.bale.ai/")
-
-    val blockedUserId: Long
-        get() = properties.getProperty("bot.blocked.user.id", "0").toLong()
+    val matrixAccessToken: String
+        get() = System.getenv("MATRIX_ACCESS_TOKEN")
+            ?: properties.getProperty("matrix.access.token")
+            ?: throw IllegalStateException("MATRIX_ACCESS_TOKEN not found in environment or properties")
 
     val dbUrl: String
         get() = properties.getProperty("db.url", "")

@@ -10,9 +10,9 @@ data class AttendanceRecord(
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null,
     @Column(name = "user_id", nullable = false)
-    var userId: Long = 0,
+    var userId: String = "",
     @Column(name = "chat_id", nullable = false)
-    var chatId: Long = 0,
+    var chatId: String = "",
     @Column(name = "attendance_date", nullable = false)
     var date: LocalDate = LocalDate.now(),
     @Enumerated(EnumType.STRING)

@@ -7,7 +7,7 @@ import jakarta.persistence.EntityManagerFactory
 import java.time.LocalDate
 
 class AttendanceService(private val emf: EntityManagerFactory) {
-    fun saveAttendanceRecords(chatId: String, users: Map<Long, UserInfo>, date: LocalDate) {
+    fun saveAttendanceRecords(chatId: String, users: Map<String, UserInfo>, date: LocalDate) {
         val em = emf.createEntityManager()
         try {
             em.transaction.begin()
@@ -15,7 +15,7 @@ class AttendanceService(private val emf: EntityManagerFactory) {
                 if (userInfo.status != AttendanceStatus.UNKNOWN) {
                     val record = AttendanceRecord(
                         userId = userId,
-                        chatId = chatId.toLong(),
+                        chatId = chatId,
                         date = date,
                         status = userInfo.status
                     )
@@ -37,7 +37,7 @@ class AttendanceService(private val emf: EntityManagerFactory) {
             val count = em.createQuery(
                 "SELECT COUNT(a) FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date = :date",
                 Long::class.java
-            ).setParameter("chatId", chatId.toLong())
+            ).setParameter("chatId", chatId)
                 .setParameter("date", date)
                 .singleResult
             return count > 0
@@ -50,7 +50,7 @@ class AttendanceService(private val emf: EntityManagerFactory) {
             return em.createQuery(
                 "SELECT a FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date = :date",
                 AttendanceRecord::class.java
-            ).setParameter("chatId", chatId.toLong())
+            ).setParameter("chatId", chatId)
                 .setParameter("date", date)
                 .resultList
         }
@@ -62,7 +62,7 @@ class AttendanceService(private val emf: EntityManagerFactory) {
             em.transaction.begin()
             em.createQuery(
                 "DELETE FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date = :date"
-            ).setParameter("chatId", chatId.toLong())
+            ).setParameter("chatId", chatId)
                 .setParameter("date", date)
                 .executeUpdate()
             em.transaction.commit()
@@ -75,26 +75,22 @@ class AttendanceService(private val emf: EntityManagerFactory) {
     }
 
     fun getAttendanceReport(chatId: String, startDate: LocalDate, endDate: LocalDate): List<AttendanceRecord> {
-        val em = emf.createEntityManager()
-        try {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
             return em.createQuery(
                 "SELECT a FROM AttendanceRecord a WHERE a.chatId = :chatId AND a.date BETWEEN :start AND :end ORDER BY a.userId, a.date",
                 AttendanceRecord::class.java
-            ).setParameter("chatId", chatId.toLong())
+            ).setParameter("chatId", chatId)
                 .setParameter("start", startDate)
                 .setParameter("end", endDate)
                 .resultList
-        } finally {
-            em.close()
         }
     }
 
-    fun getDistinctChatIds(): List<Long> {
-        val em = emf.createEntityManager()
-        try {
-            return em.createQuery("SELECT DISTINCT a.chatId FROM AttendanceRecord a", Long::class.java).resultList
-        } finally {
-            em.close()
+    fun getDistinctChatIds(): List<String> {
+        val entityManager = emf.createEntityManager()
+        entityManager.use { em ->
+            return em.createQuery("SELECT DISTINCT a.chatId FROM AttendanceRecord a", String::class.java).resultList
         }
     }
 }

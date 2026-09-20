@@ -2,24 +2,16 @@ package ir.mhdolatabadi
 
 import ir.mhdolatabadi.handlers.CallbackQueryHandler
 import ir.mhdolatabadi.handlers.SessionManager
+import ir.mhdolatabadi.matrix.MatrixClient
+import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.scheduler.DailyScheduler
 import ir.mhdolatabadi.services.*
-import ir.mhdolatabadi.utils.DateUtils
-import org.telegram.telegrambots.bots.DefaultBotOptions
-import org.telegram.telegrambots.bots.TelegramLongPollingBot
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage
-import org.telegram.telegrambots.meta.api.objects.Update
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import jakarta.persistence.EntityManagerFactory
-import kotlinx.coroutines.runBlocking
 
 class DailyBot(
-    botToken: String,
-    private val botUsername: String,
-    options: DefaultBotOptions = DefaultBotOptions(),
+    client: MatrixClient,
     entityManagerFactory: EntityManagerFactory
-) : TelegramLongPollingBot(options, botToken) {
+) : MatrixLongPollingBot(client) {
 
     private val memberService = MemberService(entityManagerFactory)
     private val attendanceService = AttendanceService(entityManagerFactory)
@@ -53,84 +45,71 @@ class DailyBot(
         callbackQueryHandler
     )
 
-    init {
+    fun startBot() {
+        start()
         scheduler.start()
     }
 
-    override fun getBotUsername(): String = botUsername
-
-    override fun onUpdateReceived(update: Update) {
+    override fun onRoomMessage(roomId: String, senderId: String, body: String, eventId: String) {
         try {
-            recordUserActivity(update)
+            recordUserActivity(roomId, senderId)
+            handleTextMessage(roomId, senderId, body)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
-            if (update.hasMessage() && update.message.hasText()) {
-                handleTextMessage(update)
-            } else if (update.hasCallbackQuery()) {
-                callbackQueryHandler.handleCallbackQuery(update)
-            }
+    override fun onReaction(roomId: String, senderId: String, targetEventId: String, key: String) {
+        try {
+            recordUserActivity(roomId, senderId)
+            callbackQueryHandler.handleReaction(roomId, senderId, targetEventId, key)
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     // ==================== ثبت کاربر جدید ====================
-    private fun recordUserActivity(update: Update) {
-        val (message, user) = when {
-            update.hasMessage() -> update.message to update.message.from
-            update.hasCallbackQuery() -> update.callbackQuery.message to update.callbackQuery.from
-            else -> return
-        }
-        if (user.isBot) return
-        val chatId = message.chatId.toLong()
-        val fullName = "${user.firstName} ${user.lastName ?: ""}".trim()
-        val displayName = fullName.ifEmpty { user.userName ?: "کاربر ${user.id}" }
-        memberService.recordUserActivity(chatId, user.id, displayName)
+    private fun recordUserActivity(chatId: String, senderId: String) {
+        val displayName = senderId.removePrefix("@").substringBefore(":")
+        memberService.recordUserActivity(chatId, senderId, displayName)
     }
 
-    private fun handleTextMessage(update: Update) {
-        val chatId = update.message.chatId.toString()
-        val text = update.message.text
-        val replyToMsgId = update.message.messageId
-
+    private fun handleTextMessage(chatId: String, senderId: String, text: String) {
         try {
             when {
-                isMirGhazab(text) -> showMainMenu(chatId, replyToMsgId)
+                isMirGhazab(text) -> showMainMenu(chatId)
 
                 text.equals("/toggle_daily_question", ignoreCase = true) -> {
                     toggleDailyQuestion(chatId)
                 }
                 text.equals("/question_now", ignoreCase = true) -> {
-                    runBlocking {
-                        try {
-                            scheduler.sendDailyQuestionNow(chatId)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            sendMessage(chatId, "❌ خطا در ارسال سوال فوری: ${e.message}")
-                        }
+                    try {
+                        scheduler.sendDailyQuestionNow(chatId)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        notify(chatId, "❌ خطا در ارسال سوال فوری: ${e.message}")
                     }
                 }
                 text.equals("/report_now", ignoreCase = true) -> {
-                    runBlocking {
-                        try {
-                            scheduler.sendDailyReportNow(chatId)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            sendMessage(chatId, "❌ خطا در ارسال گزارش فوری: ${e.message}")
-                        }
+                    try {
+                        scheduler.sendDailyReportNow(chatId)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        notify(chatId, "❌ خطا در ارسال گزارش فوری: ${e.message}")
                     }
                 }
                 text.equals("/reset_activity_today", ignoreCase = true) -> {
                     try {
                         activityService.deleteAllTodayActivities(chatId)
-                        sendMessage(chatId, "✅ تمام پاسخ‌های امروز با موفقیت پاک شدند.\nاکنون می‌توانید با /question_now سوال جدید بفرستید.")
+                        notify(chatId, "✅ تمام پاسخ‌های امروز با موفقیت پاک شدند.\nاکنون می‌توانید با /question_now سوال جدید بفرستید.")
                     } catch (e: Exception) {
-                        sendMessage(chatId, "❌ خطا در پاک کردن پاسخ‌ها: ${e.message}")
+                        notify(chatId, "❌ خطا در پاک کردن پاسخ‌ها: ${e.message}")
                     }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            sendMessage(chatId, "❌ خطا: ${e.message}")
+            notify(chatId, "❌ خطا: ${e.message}")
         }
     }
 
@@ -139,21 +118,20 @@ class DailyBot(
         val newStatus = !currentStatus
         settingService.setDailyQuestionEnabled(chatId, newStatus)
 
-        val statusText = if (newStatus) "✅ *فعال*" else "❌ *غیرفعال**"
+        val statusText = if (newStatus) "✅ فعال" else "❌ غیرفعال"
         val message = """
-            🔄 **تغییر وضعیت سوال روزانه**
-            
+            🔄 تغییر وضعیت سوال روزانه
+
             وضعیت جدید: $statusText
             ${if (newStatus) "از این پس سوال روزانه در ساعت ۲۱ ارسال خواهد شد." else "سوال روزانه دیگر به صورت خودکار ارسال نمی‌شود."}
-            
+
             برای ارسال فوری سوال از دستور /question_now استفاده کنید.
             برای پاک کردن پاسخ‌های امروز از /reset_activity_today استفاده کنید.
         """.trimIndent()
 
-        sendMessage(chatId, message)
+        notify(chatId, message)
     }
 
-    // ==================== تشخیص دستور میرغضب ====================
     private fun isMirGhazab(input: String): Boolean {
         val normalized = normalizePersian(input.trim())
         val validForms = setOf("میرغضب", "میر غضب", "ميرغضب", "میر غضب", "میرغضب", "میر غضب", "مير غضب")
@@ -164,53 +142,15 @@ class DailyBot(
         .replace('ي', 'ی').replace('ك', 'ک')
         .replace(Regex("\\s+"), " ").trim()
 
-    // ==================== منوی اصلی با نمایش وضعیت گزارش امروز ====================
-    private fun showMainMenu(chatId: String, replyToMessageId: Int) {
-        val hasAttendanceToday = attendanceService.hasAttendanceToday(chatId, DateUtils.today())
-
-        val randomBtn = InlineKeyboardButton().apply {
-            text = "🎲 میرغضب تصادفی"
-            callbackData = "random_mirghazab_menu"
-        }
-        val reportBtn = InlineKeyboardButton().apply {
-            text = if (hasAttendanceToday) {
-                "✅ گزارش امروز ثبت شده (برای ریست کلیک کنید)"
-            } else {
-                "📋 ثبت گزارش جلسه روزانه امروز"
-            }
-            callbackData = "daily_report"
-        }
-        val weeklyBtn = InlineKeyboardButton().apply {
-            text = "📊 مشاهده گزارش هفتگی (۷ روز گذشته)"
-            callbackData = "weekly_report_now"
-        }
-        val overallBtn = InlineKeyboardButton().apply {
-            text = "📊 مشاهده وضعیت توسعه/واکنش سریع"
-            callbackData = "overall_activity_report"
-        }
-        val resetBtn = InlineKeyboardButton().apply {
-            text = "🔄 حذف گزارش جلسه روزانه امروز"
-            callbackData = "reset_today_attendance"
-        }
-        val keyboard = InlineKeyboardMarkup(listOf(
-            listOf(randomBtn),
-            listOf(reportBtn),
-            listOf(weeklyBtn),
-            listOf(overallBtn),
-            listOf(resetBtn)
-        ))
-        val message = SendMessage(chatId, "لطفاً انتخاب کنید:")
-        message.replyMarkup = keyboard
-        message.replyToMessageId = replyToMessageId
-        execute(message)
+    private fun showMainMenu(chatId: String) {
+        val text = callbackQueryHandler.buildMainMenuText(chatId)
+        val eventId = sendMessage(chatId, text)
+        reactAll(chatId, eventId, callbackQueryHandler.mainMenuKeys())
     }
 
-    // ==================== ارسال پیام ساده ====================
-    private fun sendMessage(chatId: String, text: String) {
-        val msg = SendMessage(chatId, text)
-        msg.parseMode = "Markdown"
+    private fun notify(chatId: String, text: String) {
         try {
-            execute(msg)
+            sendMessage(chatId, text)
         } catch (e: Exception) {
             println("ارسال پیام به $chatId ناموفق: ${e.message}")
         }

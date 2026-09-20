@@ -12,14 +12,14 @@ class DailyActivity(
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long? = null,
     @Column(name = "user_id", nullable = false)
-    var userId: Long = 0,
+    var userId: String = "",
     @Column(name = "chat_id", nullable = false)
-    var chatId: Long = 0,
+    var chatId: String = "",
     @Column(name = "activity_date", nullable = false)
     var date: LocalDate = LocalDate.now(),
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     var status: ActivityStatus = ActivityStatus.DEVELOPMENT
 ) {
-    constructor() : this(null, 0, 0, LocalDate.now(), ActivityStatus.DEVELOPMENT)
+    constructor() : this(null, "", "", LocalDate.now(), ActivityStatus.DEVELOPMENT)
 }

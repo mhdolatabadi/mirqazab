@@ -1,18 +1,17 @@
 package ir.mhdolatabadi.scheduler
 
 import ir.mhdolatabadi.handlers.CallbackQueryHandler
+import ir.mhdolatabadi.matrix.MatrixLongPollingBot
 import ir.mhdolatabadi.services.*
 import ir.mhdolatabadi.utils.NumberUtils
 import ir.mhdolatabadi.utils.DateUtils
-import org.telegram.telegrambots.bots.TelegramLongPollingBot
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage
 import kotlinx.coroutines.*
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
 
 class DailyScheduler(
-    private val bot: TelegramLongPollingBot,
+    private val bot: MatrixLongPollingBot,
     private val reportService: ReportService,
     private val activityService: ActivityService,
     private val attendanceService: AttendanceService,
@@ -28,10 +27,10 @@ class DailyScheduler(
             while (true) {
                 val now = LocalDateTime.now(tehranZone)
                 val targetTimes = listOf(
-                    8 to 0,   // 08:00 - گزارش ترکیبی روزانه
-                    9 to 0,   // 09:00 - گزارش هفتگی/ماهانه
-                    18 to 0,  // 18:00 - یادآوری جلسه روزانه
-                    21 to 0   // 21:00 - سوال روزانه
+                    8 to 0,
+                    9 to 0,
+                    18 to 0,
+                    21 to 0
                 )
 
                 val nextRuns = targetTimes.map { (hour, minute) ->
@@ -66,52 +65,15 @@ class DailyScheduler(
         return today.dayOfWeek.value == 4 || today.dayOfWeek.value == 5
     }
 
-    private fun sendDailyQuestion() {
-        if (isHoliday()) return
-
-        val chatIds = memberService.getAllChatIds()
-        val today = DateUtils.today()
-
-        for (chatId in chatIds) {
-            if (!settingService.isDailyQuestionEnabled(chatId.toString())) {
-                continue
-            }
-
-            if (activityService.hasActivityToday(chatId.toString(), today)) {
-                continue
-            }
-
-            val (text, keyboard) = callbackQueryHandler.buildActivityMessage(chatId.toString())
-            val msg = SendMessage(chatId.toString(), text)
-            msg.replyMarkup = keyboard
-            msg.parseMode = "Markdown"
-            try {
-                bot.execute(msg)
-            } catch (e: Exception) {
-                println("ارسال سوال به $chatId ناموفق: ${e.message}")
-            }
-        }
-    }
-
-    fun sendDailyQuestionNow(chatId: String) {
-        val (text, keyboard) = callbackQueryHandler.buildActivityMessage(chatId)
-        val msg = SendMessage(chatId, text)
-        msg.replyMarkup = keyboard
-        msg.parseMode = "Markdown"
-        bot.execute(msg)
-        println("✅ سوال فوری به $chatId ارسال شد.")
-    }
 
     private fun sendDailyReport() {
         if (isHoliday()) return
 
         val chatIds = memberService.getAllChatIds()
         for (chatId in chatIds) {
-            val report = reportService.generateDailyReport(chatId.toString())
-            val msg = SendMessage(chatId.toString(), report)
-            msg.parseMode = "Markdown"
+            val report = reportService.generateDailyReport(chatId)
             try {
-                bot.execute(msg)
+                bot.sendMessage(chatId, report)
             } catch (e: Exception) {
                 println("ارسال گزارش به $chatId ناموفق: ${e.message}")
             }
@@ -120,10 +82,8 @@ class DailyScheduler(
 
     fun sendDailyReportNow(chatId: String) {
         val report = reportService.generateDailyReport(chatId)
-        val fullMessage = "📊 *گزارش روزانه (ارسال فوری)*\n\n$report"
-        val msg = SendMessage(chatId, fullMessage)
-        msg.parseMode = "Markdown"
-        bot.execute(msg)
+        val fullMessage = "📊 گزارش روزانه (ارسال فوری)\n\n$report"
+        bot.sendMessage(chatId, fullMessage)
         println("✅ گزارش فوری به $chatId ارسال شد.")
     }
 
@@ -134,12 +94,10 @@ class DailyScheduler(
         val today = DateUtils.today()
 
         for (chatId in chatIds) {
-            if (!attendanceService.hasAttendanceToday(chatId.toString(), today)) {
-                val message = "🔔 *یادآوری روزانه*\n\nگزارش جلسه امروز هنوز ثبت نشده است.\nلطفاً با ارسال كلمه «میرغضب» گزارش را ثبت کنید."
-                val msg = SendMessage(chatId.toString(), message)
-                msg.parseMode = "Markdown"
+            if (!attendanceService.hasAttendanceToday(chatId, today)) {
+                val message = "🔔 یادآوری روزانه\n\nگزارش جلسه امروز هنوز ثبت نشده است.\nلطفاً با ارسال كلمه «میرغضب» گزارش را ثبت کنید."
                 try {
-                    bot.execute(msg)
+                    bot.sendMessage(chatId, message)
                 } catch (e: Exception) {
                     println("ارسال یادآوری به $chatId ناموفق: ${e.message}")
                 }
@@ -177,12 +135,10 @@ class DailyScheduler(
         val title = "📊 گزارش هفتگی حضور و غیاب\n(از $year1/$month1/$day1 تا $year2/$month2/$day2)"
 
         for (chatId in chatIds) {
-            val report = reportService.generateWeeklyReport(chatId.toString(), startDate, endDate)
+            val report = reportService.generateWeeklyReport(chatId, startDate, endDate)
             val fullMessage = "$title\n\n$report"
-            val msg = SendMessage(chatId.toString(), fullMessage)
-            msg.parseMode = "Markdown"
             try {
-                bot.execute(msg)
+                bot.sendMessage(chatId, fullMessage)
             } catch (e: Exception) {
                 println("ارسال گزارش هفتگی به $chatId ناموفق: ${e.message}")
             }
@@ -204,15 +160,30 @@ class DailyScheduler(
         val title = "📊 گزارش ماهانه حضور و غیاب\n(از $year1/$month1/$day1 تا $year2/$month2/$day2)"
 
         for (chatId in chatIds) {
-            val report = reportService.generateWeeklyReport(chatId.toString(), startDate, endDate)
+            val report = reportService.generateWeeklyReport(chatId, startDate, endDate)
             val fullMessage = "$title\n\n$report"
-            val msg = SendMessage(chatId.toString(), fullMessage)
-            msg.parseMode = "Markdown"
             try {
-                bot.execute(msg)
+                bot.sendMessage(chatId, fullMessage)
             } catch (e: Exception) {
                 println("ارسال گزارش ماهانه به $chatId ناموفق: ${e.message}")
             }
         }
+    }
+
+    private fun sendDailyQuestion() {
+        if (isHoliday()) return
+        val chatIds = memberService.getAllChatIds()
+        val today = DateUtils.today()
+
+        for (chatId in chatIds) {
+            if (!settingService.isDailyQuestionEnabled(chatId)) continue
+            if (activityService.hasActivityOn(chatId, today)) continue
+
+            callbackQueryHandler.sendActivityMessage(chatId, today)
+        }
+    }
+
+    fun sendDailyQuestionNow(chatId: String) {
+        callbackQueryHandler.sendActivityMessage(chatId, DateUtils.today())
     }
 }

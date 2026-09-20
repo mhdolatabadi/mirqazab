@@ -5,43 +5,43 @@ import jakarta.persistence.EntityManagerFactory
 
 class MemberService(private val emf: EntityManagerFactory) {
 
-    fun getGroupMembers(chatId: String): Map<Long, String> {
+    fun getGroupMembers(chatId: String): Map<String, String> {
         val entityManager = emf.createEntityManager()
         entityManager.use { em ->
             val members = em.createQuery(
                 "SELECT m FROM GroupMember m WHERE m.chatId = :chatId",
                 GroupMember::class.java
-            ).setParameter("chatId", chatId.toLong()).resultList
+            ).setParameter("chatId", chatId).resultList
             return members.associate { it.userId to it.name }
         }
     }
 
-    fun getAllChatIds(): List<Long> {
+    fun getAllChatIds(): List<String> {
         val entityManager = emf.createEntityManager()
         entityManager.use { em ->
-            return em.createQuery("SELECT DISTINCT m.chatId FROM GroupMember m", Long::class.java).resultList
+            return em.createQuery("SELECT DISTINCT m.chatId FROM GroupMember m", String::class.java).resultList
         }
     }
 
-    fun getMirGhazabCounts(chatId: String): Map<Long, Int> {
+    fun getMirGhazabCounts(chatId: String): Map<String, Int> {
         val entityManager = emf.createEntityManager()
         entityManager.use { em ->
             val members = em.createQuery(
                 "SELECT m FROM GroupMember m WHERE m.chatId = :chatId",
                 GroupMember::class.java
-            ).setParameter("chatId", chatId.toLong()).resultList
+            ).setParameter("chatId", chatId).resultList
             return members.associate { it.userId to it.mirGhazabCount }
         }
     }
 
-    fun incrementMirGhazabCount(chatId: String, userId: Long) {
+    fun incrementMirGhazabCount(chatId: String, userId: String) {
         val em = emf.createEntityManager()
         try {
             em.transaction.begin()
             val member = em.createQuery(
                 "SELECT m FROM GroupMember m WHERE m.chatId = :chatId AND m.userId = :userId",
                 GroupMember::class.java
-            ).setParameter("chatId", chatId.toLong())
+            ).setParameter("chatId", chatId)
                 .setParameter("userId", userId)
                 .singleResult
             member.mirGhazabCount++
@@ -55,7 +55,7 @@ class MemberService(private val emf: EntityManagerFactory) {
         }
     }
 
-    fun recordUserActivity(chatId: Long, userId: Long, displayName: String) {
+    fun recordUserActivity(chatId: String, userId: String, displayName: String) {
         val em = emf.createEntityManager()
         try {
             em.transaction.begin()
@@ -74,11 +74,6 @@ class MemberService(private val emf: EntityManagerFactory) {
                     mirGhazabCount = 0
                 )
                 em.persist(newMember)
-            } else {
-                if (member.name != displayName) {
-                    member.name = displayName
-                    em.merge(member)
-                }
             }
             em.transaction.commit()
         } catch (e: Exception) {

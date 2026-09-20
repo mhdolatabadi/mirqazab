@@ -10,7 +10,6 @@ version = getGitTag().ifEmpty { "1.0-SNAPSHOT" }
 
 dependencies {
     implementation("com.google.code.gson:gson:2.13.2")
-    implementation("org.telegram:telegrambots:6.9.0")
     implementation("org.slf4j:slf4j-simple:2.0.9")
     implementation("org.jsoup:jsoup:1.17.2")
     implementation(kotlin("stdlib-jdk8"))

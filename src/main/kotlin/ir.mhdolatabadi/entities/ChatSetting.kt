@@ -8,7 +8,7 @@ import java.time.LocalDateTime
 class ChatSetting(
     @Id
     @Column(name = "chat_id", nullable = false)
-    var chatId: Long = 0,
+    var chatId: String = "",
 
     @Column(name = "daily_question_enabled", nullable = false)
     var dailyQuestionEnabled: Boolean = true,
@@ -22,5 +22,5 @@ class ChatSetting(
     @Column(name = "updated_at", nullable = false)
     var updatedAt: LocalDateTime = LocalDateTime.now()
 ) {
-    constructor() : this(0, true, false, false, LocalDateTime.now())
+    constructor() : this("", true, false, false, LocalDateTime.now())
 }

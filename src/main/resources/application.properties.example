@@ -1,0 +1,5 @@
+matrix.homeserver.url=https://matrix.example.com
+matrix.access.token=REPLACE_WITH_A_LONG_LIVED_BOT_ACCESS_TOKEN
+db.url=jdbc:postgresql://postgres:5432/dailybot
+db.user=postgres
+db.password=postgres
