@@ -25,17 +25,25 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
 
     fun start() {
         selfUserId = client.whoami()
+        log.info("Authenticated as {}, starting sync loop", selfUserId)
         scope.launch { syncLoop() }
     }
 
     private suspend fun syncLoop() {
         var since: String? = null
+        var iteration = 0L
         while (true) {
             try {
+                log.debug("Requesting sync (since={})", since)
                 val response = client.sync(since, timeoutMs = 30_000)
                 since = response.next_batch
+                iteration++
+                if (iteration == 1L || iteration % 20 == 0L) {
+                    log.info("Sync loop alive, iteration {}, since={}", iteration, since)
+                }
 
                 for (roomId in response.rooms.invite.keys) {
+                    log.info("Invited to room {}, joining", roomId)
                     runCatching { client.joinRoom(roomId) }
                         .onFailure { log.error("Failed joining room {}", roomId, it) }
                 }
@@ -43,6 +51,7 @@ abstract class MatrixLongPollingBot(protected val client: MatrixClient) {
                 for ((roomId, joinedRoom) in response.rooms.join) {
                     for (event in joinedRoom.timeline.events) {
                         if (event.sender == selfUserId) continue
+                        log.info("Received {} from {} in {}", event.type, event.sender, roomId)
                         dispatch(roomId, event)
                     }
                 }
